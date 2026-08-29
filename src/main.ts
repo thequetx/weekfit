@@ -328,6 +328,48 @@ export default class WeekfitPlugin extends Plugin {
     ]);
   }
 
+  /**
+   * A block's **placement** got longer or shorter. Not its estimate.
+   *
+   * `~90m` says how big the job is; `09:00 - 10:30` says when it's happening
+   * and for how long. `lib/source.ts` is explicit that these are different
+   * facts that coexist on one line, so dragging an edge rewrites the range and
+   * leaves the estimate alone. Silently rewriting someone's stated estimate
+   * because they nudged a block edge is the more destructive reading of the
+   * gesture, and the harder one to undo.
+   */
+  private async resizeBlock(uid: string, startMin: number, endMin: number): Promise<void> {
+    const target = this.lineFor(uid);
+    if (!target) return;
+    await this.applyEdits([
+      {
+        file: target.file,
+        line: target.line,
+        expectedText: target.text,
+        range: dayPlannerRange(startMin, endMin),
+        // The day hasn't changed, so the scheduled date shouldn't either —
+        // and `null` means "leave whatever is there alone".
+        scheduledDate: null,
+        title: target.title,
+      },
+    ]);
+  }
+
+  /** A ghost resized before it's been accepted. Still a proposal, still
+   *  nothing written — this only re-sizes the pending placement. */
+  private resizeProposal(groupKey: string, startMin: number, endMin: number): void {
+    if (!this.fit) return;
+    this.fit = {
+      ...this.fit,
+      proposals: this.fit.proposals.map((p) =>
+        p.groupKey === groupKey
+          ? { ...p, startMin, endMin, minutes: Math.max(1, endMin - startMin) }
+          : p,
+      ),
+    };
+    this.pushAll();
+  }
+
   private async unschedule(uid: string): Promise<void> {
     const target = this.lineFor(uid);
     if (!target) return;
@@ -401,6 +443,10 @@ export default class WeekfitPlugin extends Plugin {
             void this.moveBlock(uid, day, startMin),
           onUnschedule: (uid: string) => void this.unschedule(uid),
           onOpenSource: (uid: string) => void this.openSource(uid),
+          onResizeBlock: (uid: string, startMin: number, endMin: number) =>
+            void this.resizeBlock(uid, startMin, endMin),
+          onResizeProposal: (groupKey: string, startMin: number, endMin: number) =>
+            this.resizeProposal(groupKey, startMin, endMin),
           ...next,
         });
       }

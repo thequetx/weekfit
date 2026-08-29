@@ -15,12 +15,22 @@ export interface EventBlockProps {
   startMin: number;
   endMin: number;
   dragging: boolean;
+  /** A resize (edge-drag) is live on this block right now — distinct from
+   *  `dragging` (a move) so the cursor/shadow can read `ns-resize` rather
+   *  than `grabbing` while it's happening. */
+  resizing: boolean;
   onUnschedule: (uid: string) => void;
   /** Starts the drag. `WeekGrid` takes it from here — once a drag is live it
    *  tracks pointermove/pointerup/pointercancel on `window`, not on this
    *  element (a React pointermove/up prop here would only fire while the
    *  cursor stayed over the block, which is the bug this replaced). */
   onDragStart: (ev: CalEvent, e: PointerEvent<HTMLDivElement>) => void;
+  /** Starts an edge-drag resize. `WeekGrid` tracks the rest on `window`, the
+   *  same as `onDragStart` — see its own doc comment there. The handle's own
+   *  `onPointerDown` stops propagation before calling this, so a resize can
+   *  never also start a move or (on release) read as the click that opens
+   *  the source line. */
+  onResizeStart: (ev: CalEvent, edge: 'top' | 'bottom', e: PointerEvent<HTMLDivElement>) => void;
 }
 
 /**
@@ -48,6 +58,15 @@ export function eventMinutes(ev: CalEvent): { startMin: number; endMin: number }
  *    owns the drag state for both real blocks and ghosts; this component only
  *    reports the initiating `pointerdown` upward. `WeekGrid` tracks the rest
  *    of the drag on `window`, not on this element.
+ *  - **Edge-drag resize**, two thin handles (`.weekfit-resize`) pinned to the
+ *    block's top and bottom edge, each ~6px tall so the middle of the block —
+ *    where a move-drag and a click both live — stays untouched. Each handle's
+ *    own `onPointerDown` stops the event from bubbling to the block's, so a
+ *    resize can never also start a move. Below `SHORT_BLOCK_PX` the top
+ *    handle is dropped entirely: on a very short block two 6px zones plus the
+ *    Unschedule control would leave no room in the middle to grab or click
+ *    the block at all, so only the bottom handle survives and the rest of the
+ *    block keeps working as a move/click target.
  *  - **Unschedule**, a plain-language control (never a bare ✕, which reads as
  *    "delete") that hands the task back to the rail.
  *  - **Click opens the source line.** This component only forwards the raw
@@ -64,31 +83,57 @@ export function eventMinutes(ev: CalEvent): { startMin: number; endMin: number }
  * block must never look provisional. See the `weekfit-ghost` rules in
  * styles.css for the other half of that contrast.
  */
+/** Below this height (px) a top *and* bottom resize handle would leave no
+ *  room in the middle to move or click the block, so the top handle is
+ *  dropped and only the bottom one remains — see the class doc comment. */
+const SHORT_BLOCK_PX = 24;
+
 export function EventBlock({
   ev,
   startMin,
   endMin,
   dragging,
+  resizing,
   onUnschedule,
   onDragStart,
+  onResizeStart,
 }: EventBlockProps) {
   // A `1/1` would be noise, so only a real split counts as linked.
   const linked = Boolean(ev.taskId && ev.session && ev.sessions && ev.sessions > 1);
   const top = yForMinutes(startMin);
   const height = Math.max(yForMinutes(endMin) - top, 18);
   const tight = height < 40;
+  const veryShort = height < SHORT_BLOCK_PX;
 
   const label = `${ev.title} · ${fmtMinutes(startMin)}–${fmtMinutes(endMin)}`;
 
   return (
     <div
-      className={`weekfit-ev${tight ? ' weekfit-ev--tight' : ''}${dragging ? ' weekfit-ev--dragging' : ''}`}
+      className={`weekfit-ev${tight ? ' weekfit-ev--tight' : ''}${dragging ? ' weekfit-ev--dragging' : ''}${resizing ? ' weekfit-ev--resizing' : ''}`}
       style={{ top, height }}
       title={ev.description ? `${ev.title}\n\n${ev.description}` : ev.title}
       role="group"
       aria-label={label}
       onPointerDown={(e) => onDragStart(ev, e)}
     >
+      {!veryShort && (
+        <div
+          className="weekfit-resize weekfit-resize--top"
+          aria-hidden="true"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onResizeStart(ev, 'top', e);
+          }}
+        />
+      )}
+      <div
+        className="weekfit-resize weekfit-resize--bottom"
+        aria-hidden="true"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onResizeStart(ev, 'bottom', e);
+        }}
+      />
       <span className="weekfit-ev__time">{fmtClock(ev.start)}</span>
       <span className="weekfit-ev__title">{ev.title}</span>
       {linked && (

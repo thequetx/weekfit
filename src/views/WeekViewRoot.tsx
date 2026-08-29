@@ -47,6 +47,9 @@ export interface WeekViewRootProps {
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
   onOpenSource: (uid: string) => void;
+  // --- Edge-drag resize: top edge re-times start, bottom edge re-times end -
+  onResizeBlock: (uid: string, startMin: number, endMin: number) => void;
+  onResizeProposal: (groupKey: string, startMin: number, endMin: number) => void;
 }
 
 /**
@@ -99,6 +102,8 @@ export function WeekViewRoot({
   onMoveBlock,
   onUnschedule,
   onOpenSource,
+  onResizeBlock,
+  onResizeProposal,
 }: WeekViewRootProps) {
   // A single hook, called on every render regardless of which branch below
   // fires — the loading branch returns early, but only after this runs, so
@@ -238,6 +243,8 @@ export function WeekViewRoot({
           onMoveBlock={onMoveBlock}
           onUnschedule={onUnschedule}
           onOpenSource={onOpenSource}
+          onResizeBlock={onResizeBlock}
+          onResizeProposal={onResizeProposal}
         />
         <IntentionsRail tasks={unscheduledSource} durations={settings.durations} />
       </div>

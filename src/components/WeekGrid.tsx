@@ -5,7 +5,7 @@ import { DAY_NAMES, addDays, dayIndex, fmtHourLabel, fmtMinutes, sameDate } from
 import type { CalEvent, SkeletonBlock } from '../lib/types';
 import type { Gap, Proposal } from '../lib/gaps';
 import { snapToGap } from '../lib/gaps';
-import { snapToGrid } from '../lib/duration';
+import { SNAP_MINUTES, snapToGrid } from '../lib/duration';
 import { EventBlock, eventMinutes } from './EventBlock';
 import { NowLine } from './NowLine';
 import { GhostBlock } from './GhostBlock';
@@ -41,6 +41,15 @@ export interface WeekGridProps {
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
   onOpenSource: (uid: string) => void;
+  /**
+   * Edge-drag resize — a block's top edge re-times its start (end fixed), its
+   * bottom edge re-times its end (start fixed). Reports only the *final*
+   * interval, on pointer-up; the drag's own preview is local state (see
+   * `EventResizePreview`/`ProposalResizePreview` below), so this never fires
+   * mid-drag. `main.ts` turns a resized real block into a vault write.
+   */
+  onResizeBlock: (uid: string, startMin: number, endMin: number) => void;
+  onResizeProposal: (groupKey: string, startMin: number, endMin: number) => void;
 }
 
 interface DragState {
@@ -90,6 +99,102 @@ interface EventPreview {
 }
 
 /**
+ * Which drag gesture (if any) is currently live. `'ghost'`/`'event'` are the
+ * pre-existing move-drags; the four `*-resize-*` kinds are this feature — one
+ * per (ghost | real block) x (top edge | bottom edge). Deliberately *more
+ * kinds of the same state machine* rather than a second boolean/ref pair
+ * bolted on beside it: a resize is wired to `window` exactly the way a move
+ * is (see the `useEffect` below), for the same reason (correctness must not
+ * depend on the pointer staying over the element), so it shares the
+ * mechanism rather than re-deriving it.
+ */
+type DragKind =
+  | 'ghost'
+  | 'event'
+  | 'ghost-resize-top'
+  | 'ghost-resize-bottom'
+  | 'event-resize-top'
+  | 'event-resize-bottom'
+  | null;
+
+/** Grid quantum a resized edge snaps to, and — since a block can never be
+ *  shorter than one lattice step — the minimum legal duration too. */
+const MIN_DURATION_MIN = SNAP_MINUTES;
+
+/**
+ * Clamp a moving *top* edge (dragging a block's start): never above the
+ * grid's own floor, and never so far down it eats into the fixed bottom edge
+ * past the one-lattice-step minimum — which is what would otherwise invert
+ * the block (start past end) instead of just shrinking it to its floor.
+ * `Math.max(minStart, ...)` on the upper bound guards the degenerate case
+ * where the fixed edge itself sits within one step of the grid's top.
+ */
+function clampTopEdge(raw: number, anchorEndMin: number): number {
+  const minStart = startHour * 60;
+  const maxStart = Math.max(minStart, anchorEndMin - MIN_DURATION_MIN);
+  return Math.min(Math.max(raw, minStart), maxStart);
+}
+
+/** Mirror of `clampTopEdge` for a moving *bottom* edge (dragging a block's
+ *  end): never below the grid's own ceiling, never so far up it eats into
+ *  the fixed top edge past the minimum duration. */
+function clampBottomEdge(raw: number, anchorStartMin: number): number {
+  const maxEnd = endHour * 60;
+  const minEnd = Math.min(maxEnd, anchorStartMin + MIN_DURATION_MIN);
+  return Math.max(Math.min(raw, maxEnd), minEnd);
+}
+
+/**
+ * Resize state for a real block, keyed by `uid`. Mirrors `EventDragState`
+ * above but for the edge being dragged rather than the whole block:
+ *
+ *  - `anchorMin` is the *other* edge — fixed for the whole gesture, exactly
+ *    what "top edge changes start, end fixed" means.
+ *  - `origEdgeMin` is the moving edge's own value at pointerdown, used both
+ *    to seed `grabOffsetMin` (below) and, on pointer-up, to tell "the
+ *    gesture landed back where it started" apart from a real resize — a
+ *    no-op must not fire `onResizeBlock` (it would be a pointless vault
+ *    write for a real block).
+ *  - `grabOffsetMin` is `DragState.grabOffsetMin`'s idea applied to a single
+ *    edge: minutes between where the pointer grabbed the handle and the edge
+ *    itself, so the edge tracks the pointer's *delta* rather than snapping
+ *    to sit under the cursor — the same failure mode the move-drag fix above
+ *    exists to prevent, and just as real here (the handle is rarely grabbed
+ *    at its exact pixel).
+ */
+interface EventResizeState {
+  ev: CalEvent;
+  edge: 'top' | 'bottom';
+  day: number;
+  anchorMin: number;
+  origEdgeMin: number;
+  grabOffsetMin: number;
+}
+
+interface EventResizePreview {
+  uid: string;
+  startMin: number;
+  endMin: number;
+}
+
+/** Same shape as `EventResizeState`, for a ghost keyed by `key`/`groupKey`
+ *  instead of `uid`. */
+interface ProposalResizeState {
+  proposal: Proposal;
+  edge: 'top' | 'bottom';
+  day: number;
+  anchorMin: number;
+  origEdgeMin: number;
+  grabOffsetMin: number;
+}
+
+interface ProposalResizePreview {
+  key: string;
+  startMin: number;
+  endMin: number;
+}
+
+/**
  * The 7-day week grid.
  *
  * Ported from week-dashboard's `WeekGrid.tsx` (385 lines) and cut down to
@@ -119,6 +224,21 @@ interface EventPreview {
  * an array); before that (`gaps` is `null`) there is nothing to check
  * legality against, so it snaps to the grid's own 30-minute lattice instead —
  * see `handleEventDragEnd`.
+ *
+ * Edge-drag resize (both ghost and real block) is the same mechanism —
+ * `onPointerDown` on a thin handle at the block's top or bottom edge starts a
+ * gesture tracked on `window` for the same reason a move is, and the moving
+ * edge preserves its own grab offset the same way a move preserves the
+ * block's — extended with two more `dragKind`s per block type (`*-resize-top`
+ * / `*-resize-bottom`) rather than a second, parallel machine. It deliberately
+ * skips the `snapToGap` legality check a move gets: `computeGaps` marks a
+ * scheduled block's own footprint as *busy*, so a block being resized is never
+ * inside any gap in the first place, and gating on that would make every
+ * resize illegal by construction. A resize is instead clamped to the
+ * 30-minute lattice, a one-step minimum duration, and the grid's own bounds —
+ * see `clampTopEdge`/`clampBottomEdge` — and then always lands. (Marking the
+ * overlap this can create against another block is a known follow-up, not
+ * built here.)
  */
 export function WeekGrid({
   weekStart,
@@ -134,6 +254,8 @@ export function WeekGrid({
   onMoveBlock,
   onUnschedule,
   onOpenSource,
+  onResizeBlock,
+  onResizeProposal,
 }: WeekGridProps) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   // -1..7ish when `now` isn't in this week at all — no column will match it,
@@ -151,12 +273,18 @@ export function WeekGrid({
   const [preview, setPreview] = useState<Preview | null>(null);
   const eventDragRef = useRef<EventDragState | null>(null);
   const [eventPreview, setEventPreview] = useState<EventPreview | null>(null);
+  const eventResizeRef = useRef<EventResizeState | null>(null);
+  const [eventResizePreview, setEventResizePreview] = useState<EventResizePreview | null>(null);
+  const ghostResizeRef = useRef<ProposalResizeState | null>(null);
+  const [ghostResizePreview, setGhostResizePreview] = useState<ProposalResizePreview | null>(
+    null,
+  );
   // Which drag (if any) window's pointer listeners are currently wired up
   // for — null the rest of the time. State, not a ref, because attaching and
   // detaching `window` listeners is a side effect that has to run from
   // `useEffect`, and `useEffect` only re-fires when a *state* value it reads
   // changes.
-  const [dragKind, setDragKind] = useState<'ghost' | 'event' | null>(null);
+  const [dragKind, setDragKind] = useState<DragKind>(null);
 
   function dayAt(clientX: number): number {
     let bestIdx = 0;
@@ -265,7 +393,86 @@ export function WeekGrid({
     if (preview && preview.key === p.key) {
       return { day: preview.day, startMin: preview.startMin, endMin: preview.startMin + p.minutes };
     }
+    if (ghostResizePreview && ghostResizePreview.key === p.key) {
+      return { day: p.day, startMin: ghostResizePreview.startMin, endMin: ghostResizePreview.endMin };
+    }
     return { day: p.day, startMin: p.startMin, endMin: p.endMin };
+  }
+
+  // --- ghost resize: edge-drag re-times start or end, day never changes ----
+  //
+  // Deliberately its own pair of handlers rather than folded into
+  // `handleWindowDragMove`/`handleWindowDragEnd` above: a resize never
+  // changes which day the ghost is on (only vertical movement matters), has
+  // no click/drag ambiguity to resolve (the handle isn't the click target —
+  // `GhostBlock`'s `onDragStart` still owns the middle of the block), and
+  // reports through a different callback (`onResizeProposal`, not
+  // `onMoveProposal`). What it *does* share is the state machine's shape:
+  // `dragKind` gates the same `window`-listener `useEffect` below, and the
+  // grab-offset idea is `DragState.grabOffsetMin` applied to a single edge —
+  // see `EventResizeState`'s doc comment above (the real-block twin of this)
+  // for why that matters.
+
+  function handleGhostResizeStart(
+    proposal: Proposal,
+    edge: 'top' | 'bottom',
+    e: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    // Belt-and-braces, as with the move-drag's own capture call — correctness
+    // never depends on this holding, only on the `window` listeners below.
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const origEdgeMin = edge === 'top' ? proposal.startMin : proposal.endMin;
+    const anchorMin = edge === 'top' ? proposal.endMin : proposal.startMin;
+    ghostResizeRef.current = {
+      proposal,
+      edge,
+      day: proposal.day,
+      anchorMin,
+      origEdgeMin,
+      grabOffsetMin: minutesAt(proposal.day, e.clientY) - origEdgeMin,
+    };
+    setDragKind(edge === 'top' ? 'ghost-resize-top' : 'ghost-resize-bottom');
+  }
+
+  function handleWindowGhostResizeMove(e: PointerEvent) {
+    const drag = ghostResizeRef.current;
+    if (!drag) return;
+    const raw = minutesAt(drag.day, e.clientY) - drag.grabOffsetMin;
+    const snapped = snapToGrid(raw);
+    if (drag.edge === 'top') {
+      const startMin = clampTopEdge(snapped, drag.anchorMin);
+      setGhostResizePreview({ key: drag.proposal.key, startMin, endMin: drag.anchorMin });
+    } else {
+      const endMin = clampBottomEdge(snapped, drag.anchorMin);
+      setGhostResizePreview({ key: drag.proposal.key, startMin: drag.anchorMin, endMin });
+    }
+  }
+
+  function handleWindowGhostResizeEnd(e: PointerEvent) {
+    const drag = ghostResizeRef.current;
+    ghostResizeRef.current = null;
+    setDragKind(null);
+    setGhostResizePreview(null);
+    if (!drag) return;
+
+    const raw = minutesAt(drag.day, e.clientY) - drag.grabOffsetMin;
+    const snapped = snapToGrid(raw);
+    // Deliberately *not* gated on `snapToGap`/`gaps` — see the doc comment on
+    // `WeekGrid` above (Phase 2C's resize section) for why a resize is exempt
+    // from the legality check a move gets: `computeGaps` treats the block's
+    // own footprint as busy, so gating here would make every resize illegal.
+    if (drag.edge === 'top') {
+      const startMin = clampTopEdge(snapped, drag.anchorMin);
+      // Landed back where it started -> nothing to report.
+      if (startMin !== drag.origEdgeMin) {
+        onResizeProposal(drag.proposal.groupKey, startMin, drag.anchorMin);
+      }
+    } else {
+      const endMin = clampBottomEdge(snapped, drag.anchorMin);
+      if (endMin !== drag.origEdgeMin) {
+        onResizeProposal(drag.proposal.groupKey, drag.anchorMin, endMin);
+      }
+    }
   }
 
   // --- real blocks (Phase 2C): drag to re-time, click to open source -------
@@ -352,7 +559,71 @@ export function WeekGrid({
         endMin: eventPreview.startMin + (orig.endMin - orig.startMin),
       };
     }
+    if (eventResizePreview && eventResizePreview.uid === ev.uid) {
+      return { startMin: eventResizePreview.startMin, endMin: eventResizePreview.endMin };
+    }
     return orig;
+  }
+
+  // --- real-block resize: edge-drag re-times start or end ------------------
+  //
+  // See the matching comment on the ghost-resize handlers above — same
+  // reasoning applies here for why this is its own handler pair rather than
+  // folded into the move-drag's, just with `onResizeBlock` in place of
+  // `onResizeProposal` and no `snapToGap` gate (a resize is exempt from gap
+  // legality — see the doc comment on `WeekGrid`).
+
+  function handleEventResizeStart(
+    ev: CalEvent,
+    edge: 'top' | 'bottom',
+    e: ReactPointerEvent<HTMLDivElement>,
+  ) {
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    const day = dayIndex(ev.start, weekStart);
+    const orig = eventMinutes(ev);
+    const origEdgeMin = edge === 'top' ? orig.startMin : orig.endMin;
+    const anchorMin = edge === 'top' ? orig.endMin : orig.startMin;
+    eventResizeRef.current = {
+      ev,
+      edge,
+      day,
+      anchorMin,
+      origEdgeMin,
+      grabOffsetMin: minutesAt(day, e.clientY) - origEdgeMin,
+    };
+    setDragKind(edge === 'top' ? 'event-resize-top' : 'event-resize-bottom');
+  }
+
+  function handleWindowEventResizeMove(e: PointerEvent) {
+    const drag = eventResizeRef.current;
+    if (!drag) return;
+    const raw = minutesAt(drag.day, e.clientY) - drag.grabOffsetMin;
+    const snapped = snapToGrid(raw);
+    if (drag.edge === 'top') {
+      const startMin = clampTopEdge(snapped, drag.anchorMin);
+      setEventResizePreview({ uid: drag.ev.uid, startMin, endMin: drag.anchorMin });
+    } else {
+      const endMin = clampBottomEdge(snapped, drag.anchorMin);
+      setEventResizePreview({ uid: drag.ev.uid, startMin: drag.anchorMin, endMin });
+    }
+  }
+
+  function handleWindowEventResizeEnd(e: PointerEvent) {
+    const drag = eventResizeRef.current;
+    eventResizeRef.current = null;
+    setDragKind(null);
+    setEventResizePreview(null);
+    if (!drag) return;
+
+    const raw = minutesAt(drag.day, e.clientY) - drag.grabOffsetMin;
+    const snapped = snapToGrid(raw);
+    if (drag.edge === 'top') {
+      const startMin = clampTopEdge(snapped, drag.anchorMin);
+      if (startMin !== drag.origEdgeMin) onResizeBlock(drag.ev.uid, startMin, drag.anchorMin);
+    } else {
+      const endMin = clampBottomEdge(snapped, drag.anchorMin);
+      if (endMin !== drag.origEdgeMin) onResizeBlock(drag.ev.uid, drag.anchorMin, endMin);
+    }
   }
 
   // Wire pointermove/pointerup/pointercancel to `window` for exactly as long
@@ -382,6 +653,26 @@ export function WeekGrid({
         window.removeEventListener('pointermove', handleWindowEventDragMove);
         window.removeEventListener('pointerup', handleWindowEventDragEnd);
         window.removeEventListener('pointercancel', handleWindowEventDragEnd);
+      };
+    }
+    if (dragKind === 'event-resize-top' || dragKind === 'event-resize-bottom') {
+      window.addEventListener('pointermove', handleWindowEventResizeMove);
+      window.addEventListener('pointerup', handleWindowEventResizeEnd);
+      window.addEventListener('pointercancel', handleWindowEventResizeEnd);
+      return () => {
+        window.removeEventListener('pointermove', handleWindowEventResizeMove);
+        window.removeEventListener('pointerup', handleWindowEventResizeEnd);
+        window.removeEventListener('pointercancel', handleWindowEventResizeEnd);
+      };
+    }
+    if (dragKind === 'ghost-resize-top' || dragKind === 'ghost-resize-bottom') {
+      window.addEventListener('pointermove', handleWindowGhostResizeMove);
+      window.addEventListener('pointerup', handleWindowGhostResizeEnd);
+      window.addEventListener('pointercancel', handleWindowGhostResizeEnd);
+      return () => {
+        window.removeEventListener('pointermove', handleWindowGhostResizeMove);
+        window.removeEventListener('pointerup', handleWindowGhostResizeEnd);
+        window.removeEventListener('pointercancel', handleWindowGhostResizeEnd);
       };
     }
     return undefined;
@@ -493,8 +784,10 @@ export function WeekGrid({
                     startMin={pos.startMin}
                     endMin={pos.endMin}
                     dragging={eventPreview?.uid === e.uid}
+                    resizing={eventResizePreview?.uid === e.uid}
                     onUnschedule={onUnschedule}
                     onDragStart={handleEventDragStart}
+                    onResizeStart={handleEventResizeStart}
                   />
                 );
               })}
@@ -508,9 +801,11 @@ export function WeekGrid({
                     startMin={pos.startMin}
                     endMin={pos.endMin}
                     dragging={preview?.key === p.key}
+                    resizing={ghostResizePreview?.key === p.key}
                     onAccept={onAccept}
                     onDismiss={onDismiss}
                     onDragStart={handleDragStart}
+                    onResizeStart={handleGhostResizeStart}
                   />
                 );
               })}

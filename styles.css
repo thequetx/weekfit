@@ -346,6 +346,10 @@
   position: absolute;
   bottom: 2px;
   right: 4px;
+  /* Above `.weekfit-resize` (z-index 3) — the bottom handle spans the full
+     width of the block's own bottom edge and would otherwise sit on top of
+     this button's overlapping corner and swallow its clicks. */
+  z-index: 4;
   background: var(--background-primary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--background-primary) 70%, var(--background-secondary));
   border: 1px solid var(--background-modifier-border);
@@ -709,6 +713,14 @@
   display: flex;
   gap: 4px;
   margin-top: 2px;
+  /* `position: relative` (no offset — layout is unaffected) lifts this into
+     the same stacking layer as `.weekfit-resize` (z-index 3) so the z-index
+     below actually wins; an un-positioned, in-flow element stacks beneath
+     every positioned descendant regardless of DOM order, and the bottom
+     handle spanning the ghost's full width would otherwise sit on top of
+     Accept/Dismiss on a short ghost and swallow their clicks. */
+  position: relative;
+  z-index: 4;
 }
 
 .weekfit-ghost__accept,
@@ -737,6 +749,50 @@
 
 .weekfit-ghost__dismiss:hover {
   color: var(--text-normal);
+}
+
+/* ---------- Resize handles: edge-drag to change start/end ----------
+   Shared by `.weekfit-ev` and `.weekfit-ghost` (both are `position: absolute`
+   already, which is what makes them the containing block these size
+   against). Furniture only on hover — a permanently-visible strip on every
+   block, most of which never get dragged, would be a lot of visual noise for
+   very little payoff. The handle itself carries `cursor: ns-resize` even at
+   rest, so the affordance is there for a pointer that lands on it before the
+   highlight has faded in. */
+
+.weekfit-resize {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 6px;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 3;
+}
+
+.weekfit-resize--top {
+  top: 0;
+}
+
+.weekfit-resize--bottom {
+  bottom: 0;
+}
+
+.weekfit-resize:hover {
+  background: var(--interactive-accent); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--interactive-accent) 50%, transparent);
+}
+
+/* While a resize is live the cursor stays `ns-resize` over the whole block,
+   not just the 6px handle it started from — a fast drag routinely carries
+   the pointer well past the strip it began in, and `.weekfit-ev`/
+   `.weekfit-ghost`'s own `cursor: grab` would otherwise flicker back in
+   underneath it. The shadow reuses the same "this is moving" cue the
+   move-drag's own `--dragging` modifier already uses. */
+.weekfit-ev--resizing,
+.weekfit-ghost--resizing {
+  cursor: ns-resize;
+  box-shadow: 0 2px 6px var(--background-modifier-box-shadow);
 }
 
 /* ---------- Unplaced tasks: the useful half of the answer ---------- */

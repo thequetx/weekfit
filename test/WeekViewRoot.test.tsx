@@ -125,6 +125,8 @@ function renderRoot(overrides: Partial<WeekViewRootProps> = {}) {
     onMoveBlock: noop,
     onUnschedule: noop,
     onOpenSource: noop,
+    onResizeBlock: noop,
+    onResizeProposal: noop,
     ...overrides,
   };
   return render(<WeekViewRoot {...props} />);

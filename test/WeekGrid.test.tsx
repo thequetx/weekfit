@@ -62,6 +62,8 @@ function baseProps(overrides: Partial<WeekGridProps> = {}): WeekGridProps {
     onMoveBlock: vi.fn(),
     onUnschedule: vi.fn(),
     onOpenSource: vi.fn(),
+    onResizeBlock: vi.fn(),
+    onResizeProposal: vi.fn(),
     ...overrides,
   };
 }
@@ -379,5 +381,318 @@ describe('WeekGrid — click vs. drag on a real block', () => {
     windowPointer('pointerup', 250, 140);
 
     expect(onOpenSource).not.toHaveBeenCalled();
+  });
+});
+
+describe('WeekGrid — edge-drag resize', () => {
+  // Same geometry as the suites above: startHour=5 (300min), pxPerHour=46.
+  // yFor(min) lands exactly on a lattice point for any multiple of 30.
+  const yFor = (min: number) => ((min - 300) / 60) * 46;
+
+  function resizeHandle(container: HTMLElement, blockSelector: string, edge: 'top' | 'bottom') {
+    return container.querySelector(`${blockSelector} .weekfit-resize--${edge}`) as HTMLElement;
+  }
+
+  it('dragging the bottom edge down extends the block by that delta, start unchanged', () => {
+    const onResizeBlock = vi.fn();
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:20',
+      start: dateAt(WEDNESDAY, 9, 0), // startMin 540
+      end: dateAt(WEDNESDAY, 10, 0), // endMin 600
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'bottom');
+
+    // Grab exactly on the bottom edge (offset 0) and pull it down 30 minutes.
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(630));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(630));
+
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:20', 540, 630);
+    // A resize must never also move the block or open its source.
+    expect(onMoveBlock).not.toHaveBeenCalled();
+  });
+
+  it('dragging the top edge up extends it upward, end unchanged', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:21',
+      start: dateAt(WEDNESDAY, 10, 0), // startMin 600
+      end: dateAt(WEDNESDAY, 11, 0), // endMin 660
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'top');
+
+    // Grab exactly on the top edge (offset 0) and pull it up 30 minutes.
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(570));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(570));
+
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:21', 570, 660);
+  });
+
+  it('dragging the bottom edge up past the top clamps to a 30-minute minimum instead of inverting', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:22',
+      start: dateAt(WEDNESDAY, 9, 0), // startMin 540
+      end: dateAt(WEDNESDAY, 10, 0), // endMin 600
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'bottom');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    // Fling the pointer far above the block's own start — without the
+    // minimum-duration clamp this would invert the block (end before start).
+    windowPointer('pointermove', 250, BODY_TOP - 5000);
+    windowPointer('pointerup', 250, BODY_TOP - 5000);
+
+    // start(540) + one lattice step(30) = 570, never below or equal to start.
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:22', 540, 570);
+  });
+
+  it('dragging the top edge down past the bottom clamps to a 30-minute minimum instead of inverting', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:23',
+      start: dateAt(WEDNESDAY, 9, 0), // startMin 540
+      end: dateAt(WEDNESDAY, 10, 0), // endMin 600
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'top');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(540)));
+    // Fling the pointer far below the block's own end.
+    windowPointer('pointermove', 250, BODY_TOP + 100000);
+    windowPointer('pointerup', 250, BODY_TOP + 100000);
+
+    // end(600) - one lattice step(30) = 570, never past or equal to end.
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:23', 570, 600);
+  });
+
+  it('clamps at the grid bounds: the top edge cannot be pulled above the grid floor', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:24',
+      start: dateAt(WEDNESDAY, 10, 0), // startMin 600, far from the min-duration bound
+      end: dateAt(WEDNESDAY, 11, 0), // endMin 660
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'top');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    windowPointer('pointermove', 250, BODY_TOP - 5000);
+    windowPointer('pointerup', 250, BODY_TOP - 5000);
+
+    // The grid's own floor (startHour*60 = 300), not the much looser
+    // min-duration bound (660-30=630) — proof the grid clamp is what's biting.
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:24', 300, 660);
+  });
+
+  it('clamps at the grid bounds: the bottom edge cannot be pulled below the grid ceiling', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:25',
+      start: dateAt(WEDNESDAY, 20, 0), // startMin 1200, far from the min-duration bound
+      end: dateAt(WEDNESDAY, 21, 0), // endMin 1260
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'bottom');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(1260)));
+    windowPointer('pointermove', 250, BODY_TOP + 100000);
+    windowPointer('pointerup', 250, BODY_TOP + 100000);
+
+    // `minutesForY` (lib/grid.ts, not owned by this feature) itself floors a
+    // pointer position to endHour*60-30 = 1410 — one lattice step short of
+    // midnight, the same ceiling the pre-existing move-drag bottom-bound test
+    // above hits. This proves the resize clamp passes that value through
+    // rather than doing something else with it.
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:25', 1200, 1410);
+  });
+
+  it('snaps the moving edge to the 30-minute lattice', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:26',
+      start: dateAt(WEDNESDAY, 7, 15), // startMin 435 — off-lattice on purpose
+      end: dateAt(WEDNESDAY, 9, 0), // endMin 540
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'top');
+
+    // minutesForY(y)=450 (07:30) at pointerdown -> grabOffsetMin = 450-435 = 15.
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(450)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(480));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(480));
+
+    // raw = minutesAt(480) - grabOffsetMin(15) = 465, which snapToGrid rounds
+    // up to 480 (08:00) rather than leaving it at the off-lattice 465.
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:26', 480, 540);
+  });
+
+  it('does not call onMoveBlock or onOpenSource for a resize', () => {
+    const onResizeBlock = vi.fn();
+    const onMoveBlock = vi.fn();
+    const onOpenSource = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:27',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid
+        {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock, onMoveBlock, onOpenSource })}
+      />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'bottom');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(630));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(630));
+
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).not.toHaveBeenCalled();
+    expect(onOpenSource).not.toHaveBeenCalled();
+  });
+
+  it('fires the callback once, on pointer-up, not per move', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:28',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'bottom');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    // Several intermediate moves before release — none of them should fire
+    // the callback, only the final pointer-up.
+    windowPointer('pointermove', 250, BODY_TOP + yFor(630));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(660));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(600));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(690));
+    expect(onResizeBlock).not.toHaveBeenCalled();
+
+    windowPointer('pointerup', 250, BODY_TOP + yFor(690));
+
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:28', 540, 690);
+  });
+
+  // Regression guard for the bug WeekGrid was just rewritten to fix — see the
+  // "grab offset is preserved" suite above for the move-drag original. The
+  // same class of bug (a React onPointerMove/onPointerUp prop on the handle
+  // itself, which only fires while the cursor stays over a 6px-tall strip)
+  // would be *worse* for a resize handle than for a whole block, since the
+  // hit target is far smaller and a fast drag leaves it almost immediately.
+  it('tracks a resize via pointermove/pointerup dispatched on window, not the handle', () => {
+    const onResizeBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:29',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ev', 'bottom');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    // Dispatched on `window`, never on `handle` — a window-targeted
+    // PointerEvent never bubbles down into the handle's subtree, so only a
+    // real `window.addEventListener` (not a React prop on the handle) can
+    // observe this.
+    windowPointer('pointermove', 250, BODY_TOP + yFor(630));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(630));
+
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:29', 540, 630);
+  });
+
+  it('resizes a ghost via onResizeProposal, bottom edge', () => {
+    const onResizeProposal = vi.fn();
+    const onMoveProposal = vi.fn();
+    const p = proposal({ day: 2, startMin: 570, endMin: 660, minutes: 90 });
+    const { container } = render(
+      <WeekGrid {...baseProps({ proposals: [p], onResizeProposal, onMoveProposal })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ghost', 'bottom');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(660)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(690));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(690));
+
+    expect(onResizeProposal).toHaveBeenCalledTimes(1);
+    expect(onResizeProposal).toHaveBeenCalledWith('Weekly/2026-W36.md:5', 570, 690);
+    expect(onMoveProposal).not.toHaveBeenCalled();
+  });
+
+  it('resizes a ghost via onResizeProposal, top edge, and clamps its minimum duration', () => {
+    const onResizeProposal = vi.fn();
+    const p = proposal({ day: 2, startMin: 570, endMin: 660, minutes: 90 });
+    const { container } = render(
+      <WeekGrid {...baseProps({ proposals: [p], onResizeProposal })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandle(container, '.weekfit-ghost', 'top');
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(570)));
+    // Fling far past the ghost's own end — must clamp to a 30-minute
+    // minimum, not invert.
+    windowPointer('pointermove', 250, BODY_TOP + 100000);
+    windowPointer('pointerup', 250, BODY_TOP + 100000);
+
+    expect(onResizeProposal).toHaveBeenCalledTimes(1);
+    expect(onResizeProposal).toHaveBeenCalledWith('Weekly/2026-W36.md:5', 630, 660);
+  });
+
+  it('a very short block keeps only the bottom resize handle', () => {
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:30',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 9, 15), // 15 minutes -> well under the 24px floor
+    });
+    const { container } = render(<WeekGrid {...baseProps({ scheduled: [ev], gaps: null })} />);
+    installGeometry(container);
+
+    expect(container.querySelector('.weekfit-ev .weekfit-resize--bottom')).not.toBeNull();
+    expect(container.querySelector('.weekfit-ev .weekfit-resize--top')).toBeNull();
   });
 });

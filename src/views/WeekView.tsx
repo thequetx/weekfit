@@ -40,6 +40,8 @@ export interface WeekViewState {
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
   onOpenSource: (uid: string) => void;
+  onResizeBlock: (uid: string, startMin: number, endMin: number) => void;
+  onResizeProposal: (groupKey: string, startMin: number, endMin: number) => void;
 }
 
 const noop = () => {};
@@ -71,6 +73,8 @@ const INITIAL_STATE: WeekViewState = {
   onMoveBlock: noop,
   onUnschedule: noop,
   onOpenSource: noop,
+  onResizeBlock: noop,
+  onResizeProposal: noop,
 };
 
 /**

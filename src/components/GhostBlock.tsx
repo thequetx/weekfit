@@ -14,6 +14,9 @@ export interface GhostBlockProps {
   startMin: number;
   endMin: number;
   dragging: boolean;
+  /** A resize (edge-drag) is live on this ghost right now — see the matching
+   *  prop on `EventBlockProps` for why it's kept apart from `dragging`. */
+  resizing: boolean;
   onAccept: (groupKey: string) => void;
   onDismiss: (groupKey: string) => void;
   /** Starts the drag. `WeekGrid` takes it from here — once a drag is live it
@@ -21,6 +24,13 @@ export interface GhostBlockProps {
    *  element (a React pointermove/up prop here would only fire while the
    *  cursor stayed over the ghost, which is the bug this replaced). */
   onDragStart: (proposal: Proposal, e: PointerEvent<HTMLDivElement>) => void;
+  /** Starts an edge-drag resize — see `EventBlockProps.onResizeStart`, same
+   *  idea for a ghost. */
+  onResizeStart: (
+    proposal: Proposal,
+    edge: 'top' | 'bottom',
+    e: PointerEvent<HTMLDivElement>,
+  ) => void;
 }
 
 /**
@@ -40,18 +50,31 @@ export interface GhostBlockProps {
  * once the cursor leaves the ghost. The Accept and Dismiss buttons stop
  * their own `pointerdown` from bubbling up to the ghost's handler, so
  * clicking either can never be misread as the start of a drag.
+ *
+ * Edge-drag resize (top/bottom `.weekfit-resize` handles) works the same way,
+ * one level down: each handle stops its own `pointerdown` from bubbling to
+ * the ghost's move handler, and is dropped below `SHORT_BLOCK_PX` (only the
+ * bottom one) for the same "don't cover the whole body" reason as
+ * `EventBlock` — see that component's doc comment for the full rationale.
  */
+/** See `EventBlock`'s constant of the same name — same reasoning, applied to
+ *  the ghost's own minimum rendered height (20px, vs. the real block's 18). */
+const SHORT_BLOCK_PX = 24;
+
 export function GhostBlock({
   proposal,
   startMin,
   endMin,
   dragging,
+  resizing,
   onAccept,
   onDismiss,
   onDragStart,
+  onResizeStart,
 }: GhostBlockProps) {
   const top = yForMinutes(startMin);
   const height = Math.max(yForMinutes(endMin) - top, 20);
+  const veryShort = height < SHORT_BLOCK_PX;
   // A `1/1` would be noise — only a real split earns the badge, same rule as
   // EventBlock's session marker.
   const linked = Boolean(proposal.sessions && proposal.sessions > 1);
@@ -65,8 +88,8 @@ export function GhostBlock({
   return (
     <div
       className={`weekfit-ghost${dragging ? ' weekfit-ghost--dragging' : ''}${
-        proposal.conflict ? ' weekfit-ghost--conflict' : ''
-      }`}
+        resizing ? ' weekfit-ghost--resizing' : ''
+      }${proposal.conflict ? ' weekfit-ghost--conflict' : ''}`}
       style={{ top, height }}
       data-groupkey={proposal.groupKey}
       role="group"
@@ -74,6 +97,24 @@ export function GhostBlock({
       title={conflictLabel ?? label}
       onPointerDown={(e) => onDragStart(proposal, e)}
     >
+      {!veryShort && (
+        <div
+          className="weekfit-resize weekfit-resize--top"
+          aria-hidden="true"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onResizeStart(proposal, 'top', e);
+          }}
+        />
+      )}
+      <div
+        className="weekfit-resize weekfit-resize--bottom"
+        aria-hidden="true"
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          onResizeStart(proposal, 'bottom', e);
+        }}
+      />
       <span className="weekfit-ghost__time">
         {fmtMinutes(startMin)}–{fmtMinutes(endMin)}
       </span>
