@@ -226,6 +226,63 @@ export class VaultRepo {
    * rather than a `cachedRead` of every note — only files that actually carry
    * the tag get read.
    */
+  /**
+   * Every open task in the configured folders — the backlog.
+   *
+   * Deliberately **narrower than "every checkbox in the vault"**. The vault
+   * convention that shaped the `#thisweek` sweep warns that planning notes,
+   * handoff logs and templates are full of checkboxes that are not anybody's
+   * tasks; dumping all of them into a view would make the backlog the noisiest
+   * surface in the plugin and the first thing a user turns off. So this honours
+   * exactly the same folder rules as the sweep.
+   *
+   * When `taskFolders` is empty the sweep means "the whole vault", which is
+   * right for a targeted `#thisweek` search and wrong here — so the backlog
+   * reports `unscoped` instead, and the view asks the user to name some
+   * folders rather than showing them a thousand rows.
+   */
+  async readBacklog(limit = 300): Promise<{
+    tasks: VaultTask[];
+    /** No `taskFolders` set, so nothing was swept. */
+    unscoped: boolean;
+    /** More matched than `limit`; the view says so rather than pretending. */
+    truncated: boolean;
+    errors: string[];
+  }> {
+    const settings = this.getSettings();
+    const folders = settings.taskFolders ?? [];
+    const excludes = settings.excludeFolders ?? [];
+    const errors: string[] = [];
+
+    if (folders.length === 0) {
+      return { tasks: [], unscoped: true, truncated: false, errors };
+    }
+
+    const files = this.app.vault.getMarkdownFiles().filter((f) => {
+      const path = f.path.replace(/\\/g, '/');
+      if (path.endsWith('Handoff Log.md')) return false;
+      if (excludes.some((ex) => pathUnderFolder(path, ex))) return false;
+      return folders.some((fo) => pathUnderFolder(path, fo));
+    });
+
+    const out: VaultTask[] = [];
+    let truncated = false;
+    for (const f of files) {
+      if (out.length >= limit) {
+        truncated = true;
+        break;
+      }
+      try {
+        const content = await this.app.vault.cachedRead(f);
+        out.push(...parseTasksIn(content, f.path, 0, Number.MAX_SAFE_INTEGER).filter((t) => !t.done));
+      } catch {
+        errors.push(`Could not read ${f.path}`);
+      }
+    }
+
+    return { tasks: out.slice(0, limit), unscoped: false, truncated, errors };
+  }
+
   private async sweepThisWeek(settings: WeekfitSettings): Promise<VaultTask[]> {
     const folders = settings.taskFolders ?? [];
     const excludes = settings.excludeFolders ?? [];

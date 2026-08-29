@@ -20,6 +20,7 @@ const {
   removeLines,
   setFrontmatter,
   replaceChildSessions,
+  createNote,
 } = await import('../src/data/writer');
 const { TFile } = (await import('obsidian')) as unknown as { TFile: new (path: string) => any };
 const { addDays, startOfISOWeek } = await import('../src/lib/week');
@@ -51,7 +52,12 @@ class FakeVault {
     return result;
   }
 
+  /** Set to a path to make creating it blow up — the only way to check that a
+   *  failed write is reported rather than thrown. */
+  failWritesTo: string | null = null;
+
   async create(path: string, content: string) {
+    if (this.failWritesTo === path) throw new Error('disk on fire');
     this.createCalls.push(path);
     this.files.set(path, content);
     return new TFile(path);
@@ -244,26 +250,38 @@ describe('acceptProposals', () => {
     expect(result.skipped).toEqual([{ key: p.key, title: p.title, reason: 'file-missing' }]);
   });
 
-  it('refuses a whole multi-session group with needs-splitting, and writes nothing', async () => {
+  // Splitting used to be refused outright, because one task line cannot carry
+  // two time ranges. It now writes the sittings as indented children beneath
+  // the parent, which is the format the user chose. The parent stays a task —
+  // it keeps its estimate and gains no range of its own.
+  it('writes a multi-session group as indented children under the parent', async () => {
     const { app, vault } = makeApp();
-    const content = '## Tasks\n\n- [ ] Edit the big video\n';
+    const content = ['## Tasks', '', '- [ ] Edit the big video ~3h', ''].join('\n');
     vault.seed('Weekly/2026-W36.md', content);
 
     const session1 = proposal({
       key: 'g1#1',
       groupKey: 'g1',
       line: 2,
-      text: '- [ ] Edit the big video',
+      text: '- [ ] Edit the big video ~3h',
       title: 'Edit the big video',
       day: 0,
+      startMin: 9 * 60,
+      endMin: 10 * 60,
+      session: 1,
+      sessions: 2,
     });
     const session2 = proposal({
       key: 'g1#2',
       groupKey: 'g1',
       line: 2,
-      text: '- [ ] Edit the big video',
+      text: '- [ ] Edit the big video ~3h',
       title: 'Edit the big video',
       day: 1,
+      startMin: 14 * 60,
+      endMin: 15 * 60,
+      session: 2,
+      sessions: 2,
     });
 
     const result = await acceptProposals(app, [session1, session2], {
@@ -271,12 +289,53 @@ describe('acceptProposals', () => {
       weekStart: WEEK_START,
     });
 
-    expect(result.written).toBe(0);
-    expect(result.skipped).toEqual([
-      { key: 'g1', title: 'Edit the big video', reason: 'needs-splitting' },
-    ]);
-    expect(vault.processCalls).toEqual([]); // never even opened the file
-    expect(vault.files.get('Weekly/2026-W36.md')).toBe(content);
+    expect(result.errors).toEqual([]);
+    expect(result.skipped).toEqual([]);
+
+    const after = vault.files.get('Weekly/2026-W36.md') as string;
+    const lines = after.split('\n');
+
+    // The parent is untouched: still a task, still ~3h, still no range.
+    expect(lines[2]).toBe('- [ ] Edit the big video ~3h');
+
+    // Two children, indented, each with its own range and its own day.
+    expect(lines[3]).toMatch(/^\s+- \[ \] 09:00 - 10:00 Edit the big video/);
+    expect(lines[4]).toMatch(/^\s+- \[ \] 14:00 - 15:00 Edit the big video/);
+    expect(lines[3].startsWith(' ')).toBe(true);
+    expect(lines[4].startsWith(' ')).toBe(true);
+
+    // Each child says which day it is on, since a weekly note's line has no
+    // date of its own.
+    expect(lines[3]).toContain('2026-08-31');
+    expect(lines[4]).toContain('2026-09-01');
+
+    // And nothing else in the file moved.
+    expect(lines[0]).toBe('## Tasks');
+    expect(lines[1]).toBe('');
+  });
+
+  it('no longer produces needs-splitting for a multi-session group', async () => {
+    const { app, vault } = makeApp();
+    vault.seed(
+      'Weekly/2026-W36.md',
+      ['## Tasks', '', '- [ ] Edit the big video ~3h', ''].join('\n'),
+    );
+    const mk = (n: number, day: number) =>
+      proposal({
+        key: `g1#${n}`,
+        groupKey: 'g1',
+        line: 2,
+        text: '- [ ] Edit the big video ~3h',
+        title: 'Edit the big video',
+        day,
+        session: n,
+        sessions: 2,
+      });
+    const result = await acceptProposals(app, [mk(1, 0), mk(2, 1)], {
+      isDailyNoteFor: neverDaily,
+      weekStart: WEEK_START,
+    });
+    expect(result.skipped.map((s) => s.reason)).not.toContain('needs-splitting');
   });
 
   it('is idempotent on a repeat accept of the same proposal: the second is skipped as line-changed', async () => {
@@ -982,5 +1041,60 @@ describe('replaceChildSessions', () => {
     const out = vault.files.get('Weekly/2026-W36.md')!;
     expect(out.replace(/\r\n/g, '')).not.toMatch(/[\r\n]/);
     expect(out).toBe(`${parentText}\r\n${session1}\r\n${session2}\r\n- [ ] Other task\r\n`);
+  });
+});
+
+describe('createNote — the first-run seed', () => {
+  it('creates the note with exactly the content given', async () => {
+    const { app, vault } = makeApp();
+    const content = ['---', 'week: 2026-W36', '---', '', '## Tasks', ''].join('\n');
+    const result = await createNote(app, 'Weekly/2026-W36.md', content);
+    expect(result.errors).toEqual([]);
+    expect(result.written).toBe(1);
+    expect(vault.files.get('Weekly/2026-W36.md')).toBe(content);
+  });
+
+  // A seed, never a reset. Clobbering a week someone had already written
+  // would be unforgivable, so existence is refused rather than overwritten.
+  it('refuses rather than overwrites when the note already exists', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', 'mine, already');
+    const result = await createNote(app, 'Weekly/2026-W36.md', 'the template');
+    expect(result.written).toBe(0);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(vault.files.get('Weekly/2026-W36.md')).toBe('mine, already');
+  });
+
+  // vault.create throws if the parent folder is missing, and on a fresh
+  // vault `Weekly/` usually is — which is exactly the first run this
+  // command exists for.
+  it('creates the parent folder first', async () => {
+    const { app, vault } = makeApp();
+    const made: string[] = [];
+    (vault as any).createFolder = async (path: string) => {
+      made.push(path);
+    };
+    await createNote(app, 'Weekly/2026-W36.md', 'x');
+    expect(made).toEqual(['Weekly']);
+  });
+
+  it('needs no folder for a note at the vault root', async () => {
+    const { app, vault } = makeApp();
+    const made: string[] = [];
+    (vault as any).createFolder = async (path: string) => {
+      made.push(path);
+    };
+    const result = await createNote(app, '2026-W36.md', 'x');
+    expect(made).toEqual([]);
+    expect(result.written).toBe(1);
+  });
+
+  it('reports rather than throws when the create fails', async () => {
+    const { app, vault } = makeApp();
+    (vault as any).createFolder = async () => {};
+    vault.failWritesTo = 'Weekly/2026-W36.md';
+    const result = await createNote(app, 'Weekly/2026-W36.md', 'x');
+    expect(result.written).toBe(0);
+    expect(result.errors.length).toBeGreaterThan(0);
   });
 });

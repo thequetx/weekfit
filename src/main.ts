@@ -1,9 +1,21 @@
 import { Notice, Plugin, TFile } from 'obsidian';
 import { VIEW_TYPE_WEEK, WeekView } from './views/WeekView';
+import { VIEW_TYPE_BACKLOG, BacklogView } from './views/BacklogView';
+import { CaptureModal } from './views/CaptureModal';
 import { VaultRepo, notePathFor } from './data/vaultRepo';
 import { resolveNoteLocations } from './data/periodicNotes';
-import { computeFit } from './data/planner';
-import { acceptProposals, editPlacements, isoDateFor } from './data/writer';
+import { computeFit, computeReplan } from './data/planner';
+import { collectBacklog } from './data/backlog';
+import { computeReview, rollForward, writeReview } from './data/review';
+import { ReviewModal } from './views/ReviewModal';
+import { weeklyNoteTemplate } from './data/template';
+import {
+  acceptProposals,
+  appendUnderHeading,
+  createNote,
+  editPlacements,
+  isoDateFor,
+} from './data/writer';
 import { SettingsTab } from './settings/SettingsTab';
 import { DEFAULT_SETTINGS } from './data/contract';
 import type {
@@ -48,6 +60,7 @@ export default class WeekfitPlugin extends Plugin {
     this.repo = new VaultRepo(this.app, () => this.settings);
 
     this.registerView(VIEW_TYPE_WEEK, (leaf) => new WeekView(leaf));
+    this.registerView(VIEW_TYPE_BACKLOG, (leaf) => new BacklogView(leaf));
     this.addSettingTab(new SettingsTab(this.app, this));
 
     this.addCommand({
@@ -84,6 +97,31 @@ export default class WeekfitPlugin extends Plugin {
       id: 'this-week',
       name: 'Go to this week',
       callback: () => void this.goToWeek(new Date()),
+    });
+    this.addCommand({
+      id: 'replan-passed',
+      name: 'Replan what has passed',
+      callback: () => void this.runReplan(),
+    });
+    this.addCommand({
+      id: 'capture-task',
+      name: 'Capture a task',
+      callback: () => this.openCapture(),
+    });
+    this.addCommand({
+      id: 'open-backlog',
+      name: 'Open backlog',
+      callback: () => void this.activateBacklog(),
+    });
+    this.addCommand({
+      id: 'weekly-review',
+      name: 'Review this week',
+      callback: () => void this.openReview(),
+    });
+    this.addCommand({
+      id: 'create-week-note',
+      name: "Create this week's note",
+      callback: () => void this.createWeekNote(),
     });
 
     this.addRibbonIcon('calendar-range', 'Open week view', () => void this.activateView());
@@ -143,6 +181,8 @@ export default class WeekfitPlugin extends Plugin {
     }
 
     this.pushAll();
+    // Only sweeps if a backlog pane is actually open — see `refreshBacklog`.
+    await this.refreshBacklog();
   }
 
   // -------------------------------------------------------------------------
@@ -246,6 +286,148 @@ export default class WeekfitPlugin extends Plugin {
   private async toggleGaps(): Promise<void> {
     this.settings.showGaps = !this.settings.showGaps;
     await this.saveSettings();
+  }
+
+  // -------------------------------------------------------------------------
+  // replan — the feature that makes this useful on a Wednesday
+  // -------------------------------------------------------------------------
+
+  /** Blocks whose time passed without being ticked, re-fitted into what's left
+   *  of the week. Produces the same ghosts "Fit this week" does, so accepting
+   *  one goes through the identical verified write path. */
+  private async runReplan(): Promise<void> {
+    if (!this.snapshot) await this.refresh();
+    if (!this.snapshot) return;
+    if (!this.settings.windows.length) {
+      new Notice('Weekfit: no availability windows set, so there is nowhere to replan into.');
+      return;
+    }
+    this.fitting = true;
+    this.pushAll();
+    try {
+      this.fit = computeReplan(this.snapshot, this.settings, new Date());
+    } finally {
+      this.fitting = false;
+    }
+    if (this.fit && this.fit.proposals.length === 0) {
+      new Notice('Weekfit: nothing has passed unfinished — nothing to replan.');
+    }
+    this.pushAll();
+  }
+
+  // -------------------------------------------------------------------------
+  // capture, backlog, review
+  // -------------------------------------------------------------------------
+
+  /** The current week's note path, whether or not the file exists — capture
+   *  and review both need somewhere to aim before it does. */
+  private weekNotePath(): string {
+    const locations = resolveNoteLocations(this.app, this.settings);
+    return notePathFor(this.weekStart, locations.weekly.folder, locations.weekly.format);
+  }
+
+  private openCapture(): void {
+    new CaptureModal(this.app, {
+      getTargetPath: () => this.weekNotePath(),
+      write: (path, line) =>
+        appendUnderHeading(this.app, [{ file: path, heading: 'Tasks', lines: [line] }]),
+    }).open();
+  }
+
+  private async activateBacklog(): Promise<void> {
+    const { workspace } = this.app;
+    let leaf = workspace.getLeavesOfType(VIEW_TYPE_BACKLOG)[0];
+    if (!leaf) {
+      leaf = workspace.getLeaf('tab');
+      await leaf.setViewState({ type: VIEW_TYPE_BACKLOG, active: true });
+    }
+    workspace.revealLeaf(leaf);
+    await this.refreshBacklog();
+  }
+
+  private async refreshBacklog(): Promise<void> {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_BACKLOG);
+    if (!leaves.length) return; // nothing open — don't sweep the vault for nobody
+
+    const { tasks, unscoped, truncated, errors } = await this.repo.readBacklog();
+    if (unscoped) {
+      new Notice(
+        'Weekfit: set "Folders to scan" in settings to use the backlog — otherwise it would list every checkbox in your vault.',
+      );
+    }
+    if (truncated) new Notice('Weekfit: backlog is showing the first 300 tasks found.');
+    for (const e of errors) console.warn(e);
+
+    const items = collectBacklog(tasks, this.settings);
+    for (const leaf of leaves) {
+      const view = leaf.view;
+      if (view instanceof BacklogView) {
+        view.setBacklogState({
+          items,
+          onOpenSource: (file: string, line: number) => void this.openLine(file, line),
+        });
+      }
+    }
+  }
+
+  private async openReview(): Promise<void> {
+    if (!this.snapshot) await this.refresh();
+    const snapshot = this.snapshot;
+    if (!snapshot) return;
+
+    const review = computeReview(snapshot, this.settings, new Date());
+    const locations = resolveNoteLocations(this.app, this.settings);
+    const nextWeekPath = notePathFor(
+      addWeeks(this.weekStart, 1),
+      locations.weekly.folder,
+      locations.weekly.format,
+    );
+
+    new ReviewModal(this.app, {
+      review,
+      nextWeekPath,
+      onWriteReview: async () => {
+        const r = await writeReview(this.app, snapshot, review, this.settings);
+        await this.refresh();
+        return r;
+      },
+      onRollForward: async () => {
+        const r = await rollForward(this.app, snapshot, review, nextWeekPath, this.settings);
+        await this.refresh();
+        return r;
+      },
+    }).open();
+  }
+
+  /**
+   * Seed the week's note. The actual day-one wall: a vault that has never heard
+   * of this plugin has no weekly note, so the view opens empty and expects the
+   * user to build a three-heading structure by hand before anything works.
+   */
+  private async createWeekNote(): Promise<void> {
+    const path = this.weekNotePath();
+    if (this.app.vault.getAbstractFileByPath(path)) {
+      new Notice(`Weekfit: ${path} already exists.`);
+      await this.openLine(path, 0);
+      return;
+    }
+    const result = await createNote(this.app, path, weeklyNoteTemplate(this.weekStart));
+    if (result.errors.length) {
+      new Notice(`Weekfit: could not create ${path} — ${result.errors[0]}`);
+      return;
+    }
+    new Notice(`Weekfit: created ${path}.`);
+    await this.refresh();
+    await this.openLine(path, 0);
+  }
+
+  private async openLine(file: string, line: number): Promise<void> {
+    const f = this.app.vault.getAbstractFileByPath(file);
+    if (!(f instanceof TFile)) {
+      new Notice(`Weekfit: could not find ${file}`);
+      return;
+    }
+    await this.app.workspace.getLeaf(false).openFile(f, { eState: { line } });
   }
 
   // -------------------------------------------------------------------------
@@ -396,13 +578,7 @@ export default class WeekfitPlugin extends Plugin {
   private async openSource(uid: string): Promise<void> {
     const target = this.lineFor(uid);
     if (!target) return;
-    const file = this.app.vault.getAbstractFileByPath(target.file);
-    if (!(file instanceof TFile)) {
-      new Notice(`Weekfit: could not find ${target.file}`);
-      return;
-    }
-    const leaf = this.app.workspace.getLeaf(false);
-    await leaf.openFile(file, { eState: { line: target.line } });
+    await this.openLine(target.file, target.line);
   }
 
   // -------------------------------------------------------------------------

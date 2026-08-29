@@ -24,7 +24,8 @@ import type { App } from 'obsidian';
 import type { Proposal } from '../lib/gaps';
 import { dayPlannerRange, DAY_PLANNER_RE } from '../lib/source';
 import { addDays } from '../lib/week';
-import { taskTitle } from '../lib/taskmeta';
+import { parseTaskMeta, taskTitle } from '../lib/taskmeta';
+import type { MetaFlavour } from '../lib/taskmeta';
 import { applyPlacement, hasPlacement } from './dayplanner';
 import type { PlacementEdit, WriteResult, WriteSkip } from './contract';
 
@@ -159,42 +160,103 @@ export interface AcceptProposalsOptions {
   weekStart: Date;
 }
 
-/**
- * Turn accepted proposals into `PlacementEdit`s and delegate to
- * `editPlacements` for the actual write. The one thing that happens here and
- * nowhere else: refusing a group that needs more than one sitting, whole —
- * one line cannot carry two time ranges, and splitting is Phase 4.
+/** Leading whitespace + bullet + checkbox, captured separately so a child
+ *  line can be built with the parent's own indentation and bullet character
+ *  rather than a hard-coded one. Falls back to `-` with no indentation for a
+ *  parent whose own prefix is somehow missing — `replaceChildSessions` still
+ *  verifies `expectedText` before anything is written, so this only ever
+ *  affects what a *rejected* write would have looked like. */
+const PARENT_BULLET_RE = /^(\s*)([-*])\s\[[ xX]\]/;
+
+function parentBullet(parentText: string): { indent: string; bullet: string } {
+  const m = PARENT_BULLET_RE.exec(parentText);
+  return m ? { indent: m[1], bullet: m[2] } : { indent: '', bullet: '-' };
+}
+
+/** One indented child line for `replaceChildSessions`: the parent's own
+ *  indentation plus one level (four spaces, matching the fixed convention
+ *  every fixture in this file and `test/writer.test.ts` uses), the parent's
+ *  bullet, an unchecked checkbox, the range and title, and a scheduled date —
+ *  a child in a weekly note needs its own day, since it can land on a
+ *  different one than any sibling.
  *
- * A `Proposal.key` is `${file}:${line}` for every proposal that survives that
- * filter (a split group's sessions carry a `#n` suffix, and are refused
- * before reaching here), which is also what `editPlacements` reports skips
- * against — so the mapping back from an edit's location to the proposal it
- * came from is only needed for the (rare, test-only) case of a caller who
- * hands over a `key` that doesn't already match its `file`/`line`. Kept
- * explicit rather than assumed, since silently trusting that coincidence is
- * exactly the kind of thing that quietly breaks later.
+ *  Built through `applyPlacement` rather than hand-assembled, so the range
+ *  and the scheduled-date stamp go through the exact same regexes
+ *  `editPlacements` already trusts for every other write in this file. A
+ *  fresh child line carries no metadata of its own for `applyPlacement` to
+ *  detect a flavour from — unlike every other call site here, which reuses
+ *  the *target* line's own existing flavour — so when the parent is written
+ *  in the Dataview `[scheduled:: ]` flavour, a same-flavoured (and
+ *  immediately cleared) placeholder is seeded into the stub first. That
+ *  makes `applyPlacement`'s own flavour detection land on `inline` using its
+ *  real code path, rather than this file re-deriving the two written forms
+ *  of a scheduled date next to the one `lib/taskmeta.ts` already owns. */
+function childSessionLine(
+  parentText: string,
+  title: string,
+  range: string,
+  scheduledDate: string | null,
+): string {
+  const { indent, bullet } = parentBullet(parentText);
+  const flavour: MetaFlavour = parseTaskMeta(parentText).flavour === 'inline' ? 'inline' : 'emoji';
+  const seed = flavour === 'inline' ? ' [scheduled:: 0000-01-01]' : '';
+  const stub = `${indent}    ${bullet} [ ] ${title}${seed}`;
+  return applyPlacement(stub, { range, scheduledDate });
+}
+
+/**
+ * Turn accepted proposals into writes, one group at a time. A group is every
+ * proposal sharing a `groupKey` — one sitting for an ordinary task, several
+ * for one `placeItems` had to split across the week (Phase 4 §3).
+ *
+ *  - **One sitting**: unchanged from before splitting existed — a single
+ *    range (and, unless the target is today's daily note, a scheduled date)
+ *    written straight onto the task's own line via `editPlacements`.
+ *  - **Several sittings**: the parent line keeps its estimate and gets no
+ *    range of its own — it is the task, not a sitting — and each session
+ *    becomes an indented child line beneath it via `replaceChildSessions`.
+ *    A parent that already carries a Day Planner range (a single-sitting
+ *    task that slipped and is now being replanned across more than one
+ *    sitting) has that range cleared first, exactly like an ordinary
+ *    unschedule (`range: null, scheduledDate: null` — the existing `⏳`, if
+ *    any, is left alone for the same reason unscheduling never touches it:
+ *    there is no way to tell a hand-typed date from one this app wrote). A
+ *    parent that never had a range skips that step entirely, which is also
+ *    what keeps a first-time split byte-identical to before this existed.
+ *
+ * `Proposal.key` is `${file}:${line}` for a one-sitting group, and
+ * `${file}:${line}#n` for the nth session of a split one — never the write
+ * target directly, so skips from the underlying writers are always remapped
+ * back to the *group's* key/title before being reported, the same discipline
+ * the one-sitting path already followed before splitting existed.
  */
 export async function acceptProposals(
   app: App,
   proposals: Proposal[],
   opts: AcceptProposalsOptions,
 ): Promise<WriteResult> {
-  const skipped: WriteSkip[] = [];
-
-  // --- refuse any group that needs more than one sitting, whole -----------
   const byGroup = groupByKey(proposals, (p) => p.groupKey);
-  const writable: Proposal[] = [];
+  const single: Proposal[] = [];
+  const groups: { groupKey: string; sessions: Proposal[] }[] = [];
+
   for (const [groupKey, group] of byGroup) {
     if (group.length > 1) {
-      skipped.push({ key: groupKey, title: group[0].title, reason: 'needs-splitting' });
-      continue;
+      groups.push({
+        groupKey,
+        sessions: [...group].sort((a, b) => (a.session ?? 0) - (b.session ?? 0)),
+      });
+    } else {
+      single.push(group[0]);
     }
-    writable.push(group[0]);
   }
 
-  // --- build the edits, remembering each one's originating proposal --------
+  const skipped: WriteSkip[] = [];
+  const errors: string[] = [];
+  let written = 0;
+
+  // --- one-sitting groups: exactly today's behaviour -----------------------
   const originOf = new Map<string, { key: string; title: string }[]>();
-  const edits: PlacementEdit[] = writable.map((p) => {
+  const singleEdits: PlacementEdit[] = single.map((p) => {
     const loc = locationKey(p);
     const queue = originOf.get(loc) ?? [];
     queue.push({ key: p.key, title: p.title });
@@ -210,24 +272,91 @@ export async function acceptProposals(
     };
   });
 
-  const result = await editPlacements(app, edits);
+  if (singleEdits.length) {
+    const result = await editPlacements(app, singleEdits);
+    written += result.written;
+    errors.push(...result.errors);
+    for (const s of result.skipped) {
+      const queue = originOf.get(s.key);
+      const origin = queue?.shift();
+      skipped.push(origin ? { ...s, key: origin.key, title: origin.title } : s);
+    }
+  }
 
-  // Skips from editPlacements are reported against `file:line`; translate
-  // each one back to the proposal it came from (in the order the edits for
-  // that location were queued, matching the order editPlacements processes
-  // them in), so a caller of acceptProposals sees the same `key`/`title` it
-  // always has.
-  const remapped: WriteSkip[] = result.skipped.map((s) => {
-    const queue = originOf.get(s.key);
-    const origin = queue?.shift();
-    return origin ? { ...s, key: origin.key, title: origin.title } : s;
-  });
+  // --- split groups: clear a stale range on the parent, then write sessions
+  //     as children beneath it --------------------------------------------
+  if (groups.length) {
+    const parentTextOf = new Map(groups.map((g) => [g.groupKey, g.sessions[0].text]));
+    const needsClear = groups.filter((g) => hasPlacement(parentTextOf.get(g.groupKey)!));
 
-  return {
-    written: result.written,
-    skipped: [...skipped, ...remapped],
-    errors: result.errors,
-  };
+    // A group whose parent needed clearing and didn't survive it (the line
+    // moved since the snapshot, or stopped being a checkbox) must not have
+    // its children written on top of whatever is there now.
+    const droppedGroupKeys = new Set<string>();
+
+    if (needsClear.length) {
+      const clearEdits: PlacementEdit[] = needsClear.map((g) => ({
+        file: g.sessions[0].file,
+        line: g.sessions[0].line,
+        expectedText: g.sessions[0].text,
+        range: null,
+        scheduledDate: null,
+        title: g.sessions[0].title,
+      }));
+      const clearResult = await editPlacements(app, clearEdits);
+      errors.push(...clearResult.errors);
+
+      const byLoc = new Map(needsClear.map((g) => [locationKey(g.sessions[0]), g]));
+      for (const s of clearResult.skipped) {
+        const g = byLoc.get(s.key);
+        if (g) {
+          droppedGroupKeys.add(g.groupKey);
+          skipped.push({ key: g.groupKey, title: g.sessions[0].title, reason: s.reason });
+        } else {
+          skipped.push(s);
+        }
+      }
+    }
+
+    const survivors = groups.filter((g) => !droppedGroupKeys.has(g.groupKey));
+    if (survivors.length) {
+      const childEdits: ChildSessionsEdit[] = survivors.map((g) => {
+        const parentText = parentTextOf.get(g.groupKey)!;
+        const cleared = hasPlacement(parentText)
+          ? applyPlacement(parentText, { range: null, scheduledDate: null })
+          : parentText;
+        return {
+          file: g.sessions[0].file,
+          line: g.sessions[0].line,
+          expectedText: cleared,
+          title: g.sessions[0].title,
+          sessions: g.sessions.map((p) =>
+            childSessionLine(
+              parentText,
+              p.title,
+              dayPlannerRange(p.startMin, p.endMin),
+              opts.isDailyNoteFor(p.file, p.day) ? null : isoDateFor(opts.weekStart, p.day),
+            ),
+          ),
+        };
+      });
+
+      const childResult = await replaceChildSessions(app, childEdits);
+      errors.push(...childResult.errors);
+
+      const byLoc = new Map(survivors.map((g) => [locationKey(g.sessions[0]), g]));
+      const skippedLocs = new Set(childResult.skipped.map((s) => s.key));
+      for (const g of survivors) {
+        if (!skippedLocs.has(locationKey(g.sessions[0]))) written += g.sessions.length;
+      }
+      for (const s of childResult.skipped) {
+        const g = byLoc.get(s.key);
+        skipped.push(g ? { key: g.groupKey, title: g.sessions[0].title, reason: s.reason } : s);
+      }
+    }
+  }
+
+  return { written, skipped, errors };
 }
 
 // ---------------------------------------------------------------------------
@@ -670,4 +799,50 @@ export async function replaceChildSessions(
   }
 
   return { written, skipped, errors };
+}
+
+// ---------------------------------------------------------------------------
+// createNote — the first-run seed
+// ---------------------------------------------------------------------------
+
+/**
+ * Create a note that doesn't exist yet, making its parent folders on the way.
+ *
+ * Exists for the "Create this week's note" command, which is the answer to the
+ * actual day-one wall: a vault that has never heard of this plugin has no
+ * weekly note, so the view opens empty and quietly expects the user to build a
+ * three-heading structure by hand before anything works.
+ *
+ * `vault.create` throws if the parent folder is missing, and on a fresh vault
+ * `Weekly/` usually is — so the folders are made first. Refuses rather than
+ * overwrites if the file already exists: this is a seed, never a reset, and
+ * clobbering a week someone had already written would be unforgivable.
+ */
+export async function createNote(app: App, file: string, content: string): Promise<WriteResult> {
+  const errors: string[] = [];
+  try {
+    if (app.vault.getAbstractFileByPath(file)) {
+      errors.push(`${file} already exists`);
+      return { written: 0, skipped: [], errors };
+    }
+
+    const slash = file.lastIndexOf('/');
+    if (slash > 0) {
+      const folder = file.slice(0, slash);
+      if (!app.vault.getAbstractFileByPath(folder)) {
+        try {
+          await app.vault.createFolder(folder);
+        } catch {
+          // Another process may have made it between the check and the call,
+          // which is success as far as this is concerned.
+        }
+      }
+    }
+
+    await app.vault.create(file, content);
+    return { written: 1, skipped: [], errors };
+  } catch (err) {
+    errors.push(`${file}: ${err instanceof Error ? err.message : String(err)}`);
+    return { written: 0, skipped: [], errors };
+  }
 }

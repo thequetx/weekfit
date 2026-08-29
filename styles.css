@@ -897,3 +897,143 @@
   font-size: 0.8em;
   margin-top: 2px;
 }
+
+/* ---------- Backlog view: unscheduled work, out of the rail's way ---------- */
+/* Row shape mirrors .weekfit-rail__item above deliberately — a task should
+   read as the same thing whether it's sitting in the week's rail or here.
+   The one addition is .weekfit-backlog__source, since this list can span
+   every configured task folder rather than one week's note. */
+
+.weekfit-backlog {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--size-4-2);
+}
+
+.weekfit-backlog__heading {
+  margin: 0 0 6px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.weekfit-backlog__empty {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.weekfit-backlog__empty code {
+  background: var(--background-secondary);
+  padding: 1px 4px;
+  border-radius: var(--radius-s);
+  font-size: 0.95em;
+}
+
+.weekfit-backlog__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.weekfit-backlog__item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+  cursor: pointer;
+}
+
+.weekfit-backlog__item:hover {
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--background-secondary) 70%, var(--interactive-accent));
+}
+
+.weekfit-backlog__item:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.weekfit-backlog__pri {
+  font-size: 0.85em;
+  line-height: 1;
+  flex: none;
+}
+
+.weekfit-backlog__pri--highest,
+.weekfit-backlog__pri--high {
+  color: var(--color-red);
+}
+
+.weekfit-backlog__pri--medium {
+  color: var(--color-orange);
+}
+
+.weekfit-backlog__pri--low,
+.weekfit-backlog__pri--lowest {
+  color: var(--text-muted);
+}
+
+.weekfit-backlog__title {
+  flex: 1 1 auto;
+  min-width: 120px;
+  font-size: 0.9em;
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+
+.weekfit-backlog__due {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  flex: none;
+}
+
+/* The one other place crimson shows up here — deliberately, matching
+   .weekfit-rail__due--overdue's own reasoning. */
+.weekfit-backlog__due--overdue {
+  color: var(--color-red);
+  font-weight: 600;
+}
+
+.weekfit-backlog__est {
+  font-size: 0.75em;
+  color: var(--text-muted);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An explicit `~90m` on the line reads as a plain statement of fact. */
+.weekfit-backlog__est--override {
+  color: var(--text-normal);
+}
+
+/* A size the plugin guessed — from a `#tag` default or the global fallback —
+   stays muted and picks up the `≈` marker below, same quiet-adoption
+   reasoning as the rail's own est badge. */
+.weekfit-backlog__est--kind,
+.weekfit-backlog__est--default {
+  font-style: italic;
+}
+
+.weekfit-backlog__est-guess {
+  margin-right: 1px;
+  opacity: 0.75;
+}
+
+.weekfit-backlog__source {
+  font-size: 0.72em;
+  color: var(--text-faint);
+  flex: none;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

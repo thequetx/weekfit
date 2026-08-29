@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeFit, proposalGroups } from '../src/data/planner';
+import { computeFit, computeReplan, proposalGroups } from '../src/data/planner';
 import type { WeekSnapshot, WeekfitSettings } from '../src/data/contract';
 import { DEFAULT_SETTINGS } from '../src/data/contract';
 import { addDays, startOfISOWeek } from '../src/lib/week';
@@ -233,5 +233,82 @@ describe('computeFit — already-placed work is left alone', () => {
       NOW,
     );
     expect(placed.capacity.committedMin).toBe(0);
+  });
+});
+
+describe('computeReplan — what did not happen, re-fitted', () => {
+  // A block on Monday morning, and a clock on Wednesday, so it has plainly
+  // passed. `scheduledLines[i]` is the task line `scheduled[i]` came from —
+  // that lockstep is how the replan knows whether it was ever ticked.
+  function passedWeek(done: boolean, extra: Partial<WeekSnapshot> = {}): WeekSnapshot {
+    const start = addDays(WEEK_START, 0);
+    start.setMinutes(9 * 60);
+    const end = addDays(WEEK_START, 0);
+    end.setMinutes(10 * 60);
+    const line = done
+      ? '- [x] 09:00 - 10:00 Fix badge alpha'
+      : '- [ ] 09:00 - 10:00 Fix badge alpha';
+    return snapshot({
+      scheduled: [
+        {
+          uid: 'Weekly/2026-W36.md:2',
+          title: 'Fix badge alpha',
+          start,
+          end,
+          allDay: false,
+          source: 'Weekly/2026-W36.md#L2',
+        },
+      ],
+      scheduledLines: [task(line, { line: 2, done })],
+      ...extra,
+    });
+  }
+
+  const wednesday = (() => {
+    const d = addDays(WEEK_START, 2);
+    d.setMinutes(8 * 60);
+    return d;
+  })();
+
+  const week = settings({ windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 17 * 60)] });
+
+  it('proposes a new slot for a block that passed without being ticked', () => {
+    const fit = computeReplan(passedWeek(false), week, wednesday);
+    expect(fit.proposals.length).toBeGreaterThan(0);
+    expect(fit.proposals.every((p) => p.kind === 'replan')).toBe(true);
+  });
+
+  it('proposes nothing for a block that passed and was ticked done', () => {
+    const fit = computeReplan(passedWeek(true), week, wednesday);
+    expect(fit.proposals).toEqual([]);
+  });
+
+  it('does not replan a block that has not happened yet', () => {
+    // Same block, but the clock is Monday 08:00 — before it starts.
+    const monday = addDays(WEEK_START, 0);
+    monday.setMinutes(8 * 60);
+    const fit = computeReplan(passedWeek(false), week, monday);
+    expect(fit.proposals).toEqual([]);
+  });
+
+  it('places the replacement after now, never back where it already failed', () => {
+    const fit = computeReplan(passedWeek(false), week, wednesday);
+    for (const p of fit.proposals) {
+      // Wednesday is day 2; nothing may be offered on Monday or Tuesday.
+      expect(p.day).toBeGreaterThanOrEqual(2);
+    }
+  });
+
+  it('returns the same shape computeFit does, so the view needs no new branch', () => {
+    const fit = computeReplan(passedWeek(false), week, wednesday);
+    expect(fit).toHaveProperty('gaps');
+    expect(fit).toHaveProperty('proposals');
+    expect(fit).toHaveProperty('unplaced');
+    expect(fit).toHaveProperty('capacity');
+  });
+
+  it('proposes nothing when no window is configured', () => {
+    const fit = computeReplan(passedWeek(false), settings({ windows: [] }), wednesday);
+    expect(fit.proposals).toEqual([]);
   });
 });
