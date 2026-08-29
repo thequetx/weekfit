@@ -1,0 +1,33 @@
+{
+  "name": "weekfit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Press one button and see where the week's work fits.",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "deploy": "node scripts/deploy.mjs"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@types/node": "^26.4.0",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "builtin-modules": "^5.3.0",
+    "esbuild": "^0.28.2",
+    "ical.js": "^2.2.1",
+    "jsdom": "^30.0.1",
+    "obsidian": "^1.13.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.11",
+    "yaml": "^2.9.0"
+  }
+}

@@ -1,0 +1,246 @@
+// The React tree WeekView mounts. Kept in its own file, with no Obsidian
+// imports, so it can be rendered directly in a test (see
+// test/WeekViewRoot.test.tsx) without needing an Obsidian runtime.
+
+import { useState } from 'react';
+import type { FitState, WeekSnapshot, WeekfitSettings, WriteResult } from '../data/contract';
+import { fmtWeekRange } from '../lib/week';
+import { WeekGrid } from '../components/WeekGrid';
+import { IntentionsRail } from '../components/IntentionsRail';
+import { CapacityLine } from '../components/CapacityLine';
+import { UnplacedList } from '../components/UnplacedList';
+import { WriteResultNotice } from '../components/WriteResultNotice';
+
+export interface WeekViewRootProps {
+  /** The week to render, or `null` while the adapter is still reading it. */
+  snapshot: WeekSnapshot | null;
+  settings: WeekfitSettings;
+  now: Date;
+  onRefresh: () => void;
+  // --- Phase 2C: week navigation -------------------------------------------
+  /** Monday of the week being shown — not necessarily the current one. Every
+   *  positional calculation in this tree keys off this (or `snapshot.weekStart`,
+   *  which the caller keeps in step with it), never off `new Date()`. */
+  weekStart: Date;
+  isCurrentWeek: boolean;
+  onPrevWeek: () => void;
+  onNextWeek: () => void;
+  onToday: () => void;
+  // --- Phase 2: "Fit this week" and the ghosts it produces ---------------
+  /** `null` = "Fit this week" hasn't been pressed yet (or its ghosts were
+   *  cleared). Non-null even when empty — an empty `proposals` array with a
+   *  non-empty `unplaced` is a real, meaningful result. */
+  fit: FitState | null;
+  /** A fit is being computed right now — disables the button and shows a
+   *  pending state, rather than inviting a second press mid-calculation. */
+  fitting: boolean;
+  /** The result of the most recent accept, or null before the first one. */
+  lastWrite: WriteResult | null;
+  onFit: () => void;
+  onClearFit: () => void;
+  onAccept: (groupKey: string) => void;
+  onAcceptAll: () => void;
+  onDismiss: (groupKey: string) => void;
+  onMoveProposal: (groupKey: string, day: number, startMin: number) => void;
+  onToggleGaps: () => void;
+  // --- Phase 2C: manipulating a block already on the grid ------------------
+  onMoveBlock: (uid: string, day: number, startMin: number) => void;
+  onUnschedule: (uid: string) => void;
+  onOpenSource: (uid: string) => void;
+}
+
+/**
+ * The week surface: header, 7-day grid, unscheduled-task rail, and — Phase 2 —
+ * the "Fit this week" button, its ghost proposals, the capacity line, and
+ * what happened on the last accept.
+ *
+ * Rebuilt from Phase 0's placeholder using week-dashboard's `Planner.tsx`
+ * (668 lines) as the shape to follow rather than something to port: Planner
+ * is the Electron app's whole-window orchestrator and almost none of that
+ * exists yet in a plugin that only reads (now: reads and, via callbacks,
+ * proposes into) one week. What's kept from it is the outline — header with
+ * the week range, a fit bar, grid, rail beside it.
+ *
+ * Nothing in this file writes to the vault. `onAccept` / `onAcceptAll` are
+ * callbacks the caller wires to the actual write path (Phase 2's other half,
+ * built elsewhere) — from here they're just props, same as `onRefresh` always
+ * was.
+ *
+ * Week navigation (Phase 2C): `weekStart` is the week actually being shown —
+ * not necessarily the current one, since a week planner's main job is
+ * planning *next* week — and every positional read in this tree (the header
+ * range, the grid, the now-line) comes from it or from `snapshot.weekStart`,
+ * never from `new Date()`. `isCurrentWeek` only ever decides whether the
+ * "Today" control is inert; whether the now-line actually shows up is a
+ * separate question `WeekGrid` answers itself from `now` against `weekStart`,
+ * so navigating away from the current week and back can't leave the two
+ * disagreeing.
+ */
+export function WeekViewRoot({
+  snapshot,
+  settings,
+  now,
+  onRefresh,
+  weekStart,
+  isCurrentWeek,
+  onPrevWeek,
+  onNextWeek,
+  onToday,
+  fit,
+  fitting,
+  lastWrite,
+  onFit,
+  onClearFit,
+  onAccept,
+  onAcceptAll,
+  onDismiss,
+  onMoveProposal,
+  onToggleGaps,
+  onMoveBlock,
+  onUnschedule,
+  onOpenSource,
+}: WeekViewRootProps) {
+  // A single hook, called on every render regardless of which branch below
+  // fires — the loading branch returns early, but only after this runs, so
+  // the hook order stays stable across a snapshot arriving on a later render.
+  const [errorsDismissed, setErrorsDismissed] = useState(false);
+
+  if (!snapshot) {
+    return (
+      <div className="weekfit-week-view">
+        <header className="weekfit-head">
+          <h2 className="weekfit-head__title">Weekfit</h2>
+        </header>
+        <p className="weekfit-loading">Loading week…</p>
+      </div>
+    );
+  }
+
+  const unscheduledSource = [...snapshot.tasks, ...snapshot.thisweek];
+  const showErrors = snapshot.errors.length > 0 && !errorsDismissed;
+  const showWriteNotice =
+    lastWrite != null && (lastWrite.skipped.length > 0 || lastWrite.errors.length > 0);
+
+  return (
+    <div className="weekfit-week-view">
+      <header className="weekfit-head">
+        <div className="weekfit-head__nav">
+          <button
+            type="button"
+            className="weekfit-head__navbtn"
+            onClick={onPrevWeek}
+            aria-label="Previous week"
+          >
+            ‹
+          </button>
+          <span className="weekfit-head__range">{fmtWeekRange(weekStart)}</span>
+          <button
+            type="button"
+            className="weekfit-head__navbtn"
+            onClick={onNextWeek}
+            aria-label="Next week"
+          >
+            ›
+          </button>
+          <button
+            type="button"
+            className="weekfit-head__navbtn weekfit-head__today"
+            onClick={onToday}
+            disabled={isCurrentWeek}
+            title={isCurrentWeek ? "You're already on the current week" : 'Jump to the current week'}
+            aria-label="Go to the current week"
+          >
+            Today
+          </button>
+        </div>
+        <button type="button" className="weekfit-head__refresh" onClick={onRefresh}>
+          Refresh
+        </button>
+      </header>
+
+      {/* Phase 2 — the button that makes the whole pitch true, the capacity
+          line beside it, and the controls for the ghosts it produces. */}
+      <div className="weekfit-fitbar">
+        <div className="weekfit-fitbar__row">
+          <button
+            type="button"
+            className="weekfit-fitbar__fit"
+            onClick={onFit}
+            disabled={fitting}
+            aria-busy={fitting}
+          >
+            {fitting ? 'Fitting…' : 'Fit this week'}
+          </button>
+          {fit && (
+            <>
+              <button type="button" className="weekfit-fitbar__acceptall" onClick={onAcceptAll}>
+                Accept all
+              </button>
+              <button type="button" className="weekfit-fitbar__clear" onClick={onClearFit}>
+                Clear ghosts
+              </button>
+            </>
+          )}
+          <label className="weekfit-fitbar__gaps">
+            <input type="checkbox" checked={settings.showGaps} onChange={onToggleGaps} />
+            Show gap candidates
+          </label>
+        </div>
+        {fit && <CapacityLine capacity={fit.capacity} />}
+      </div>
+
+      {fit && fit.unplaced.length > 0 && <UnplacedList unplaced={fit.unplaced} />}
+      {showWriteNotice && lastWrite && <WriteResultNotice result={lastWrite} />}
+
+      {/* Only when there is genuinely nothing to show. A null `notePath` is a
+          normal state in `daily` mode — the week can be fully populated from
+          daily notes and a "no weekly note" notice over the top of it would be
+          both wrong and alarming. */}
+      {snapshot.notePath === null &&
+        snapshot.tasks.length === 0 &&
+        snapshot.thisweek.length === 0 &&
+        snapshot.scheduled.length === 0 && (
+          <p className="weekfit-notice weekfit-notice--quiet">
+            No weekly note for this week yet.
+          </p>
+        )}
+
+      {showErrors && (
+        <div className="weekfit-notice weekfit-notice--error" role="alert">
+          <ul className="weekfit-notice__list">
+            {snapshot.errors.map((e, i) => (
+              <li key={i}>{e}</li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            className="weekfit-notice__dismiss"
+            onClick={() => setErrorsDismissed(true)}
+            aria-label="Dismiss"
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div className="weekfit-week-view__main">
+        <WeekGrid
+          weekStart={weekStart}
+          now={now}
+          scheduled={snapshot.scheduled}
+          blocks={settings.blocks}
+          gaps={fit ? fit.gaps : null}
+          showGaps={settings.showGaps}
+          proposals={fit?.proposals ?? []}
+          onAccept={onAccept}
+          onDismiss={onDismiss}
+          onMoveProposal={onMoveProposal}
+          onMoveBlock={onMoveBlock}
+          onUnschedule={onUnschedule}
+          onOpenSource={onOpenSource}
+        />
+        <IntentionsRail tasks={unscheduledSource} durations={settings.durations} />
+      </div>
+    </div>
+  );
+}

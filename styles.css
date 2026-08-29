@@ -1,0 +1,817 @@
+/*
+ * Weekfit styles — Phase 1B.
+ *
+ * The desktop app (week-dashboard) styled itself with a bespoke dark theme
+ * (src/styles/tokens.css + base.css) and custom fonts. None of that ships
+ * here: every rule below is written against Obsidian's own CSS variables, so
+ * the plugin inherits whatever theme + accent colour the user already has,
+ * in both light and dark. There is not a single hardcoded hex colour in this
+ * file — every colour, including translucent tints, is derived from an
+ * Obsidian variable (`color-mix()` blends a variable toward transparent
+ * rather than picking a fixed rgba() base).
+ *
+ * Every selector is prefixed `.weekfit-` (state modifiers too, e.g.
+ * `.weekfit-grid__col--today` rather than a bare `.is-today`) so nothing here
+ * can leak into the rest of the app — a community plugin's stylesheet is
+ * global, not scoped to its own view.
+ */
+
+.weekfit-week-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  background: var(--background-primary);
+}
+
+/* ---------- Header ---------- */
+
+.weekfit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: none;
+}
+
+.weekfit-head__title {
+  margin: 0;
+  font-size: 1em;
+  font-weight: 600;
+}
+
+.weekfit-head__nav {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+/* Week navigation (Phase 2C) — real buttons, always enabled except "Today",
+   which goes inert rather than vanishing once there is nowhere left for it
+   to take you (WeekViewRoot's own call — see its doc comment). */
+.weekfit-head__navbtn {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  padding: 1px 8px;
+  font-size: 0.9em;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.weekfit-head__navbtn:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.weekfit-head__navbtn:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.weekfit-head__today {
+  margin-left: 2px;
+  font-size: 0.82em;
+}
+
+/* Keyboard users tab through the nav controls (and every other button in the
+   view) — Obsidian's own theme doesn't guarantee a visible focus ring inside
+   a plugin pane, so this view draws its own rather than relying on one. */
+.weekfit-week-view button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.weekfit-head__range {
+  font-weight: 600;
+  font-size: 1.05em;
+  color: var(--text-normal);
+}
+
+.weekfit-head__refresh {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--radius-s);
+  padding: 4px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.weekfit-head__refresh:hover {
+  background: var(--interactive-accent-hover);
+}
+
+/* ---------- Loading / notices ---------- */
+
+.weekfit-loading {
+  padding: var(--size-4-2);
+  color: var(--text-muted);
+}
+
+.weekfit-notice {
+  margin: var(--size-4-2) var(--size-4-2) 0;
+  padding: 6px var(--size-4-2);
+  border-radius: var(--radius-s);
+  font-size: 0.85em;
+  flex: none;
+}
+
+.weekfit-notice code {
+  background: var(--background-secondary);
+  padding: 1px 4px;
+  border-radius: var(--radius-s);
+  font-size: 0.95em;
+}
+
+/* "Absence is normal" (WeekViewRoot §2) — no note yet reads as a quiet aside,
+   not an error banner. */
+.weekfit-notice--quiet {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* A malformed vault line must never stop the week rendering, but it should
+   still say so — dismissible, so it doesn't sit there forever once seen. */
+.weekfit-notice--error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--size-4-2);
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--color-red) 12%, var(--background-primary));
+  border: 1px solid var(--color-red); /* fallback: no color-mix */
+  border: 1px solid color-mix(in srgb, var(--color-red) 35%, transparent);
+}
+
+.weekfit-notice__list {
+  margin: 0;
+  padding-left: 1.1em;
+}
+
+.weekfit-notice__dismiss {
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 1em;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.weekfit-notice__dismiss:hover {
+  color: var(--text-normal);
+}
+
+/* ---------- Layout: grid + rail side by side ---------- */
+
+.weekfit-week-view__main {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ---------- Week grid ---------- */
+
+.weekfit-grid {
+  display: grid;
+  grid-template-columns: 48px repeat(7, minmax(88px, 1fr));
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: auto;
+  padding-top: 4px;
+}
+
+.weekfit-grid__gutter {
+  display: flex;
+  flex-direction: column;
+}
+
+.weekfit-grid__gutterhead {
+  min-height: 34px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.weekfit-grid__gutterbody {
+  position: relative;
+  flex: 1 1 auto;
+}
+
+.weekfit-grid__hour {
+  position: absolute;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 0.7em;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.weekfit-grid__col {
+  border-left: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* Today's column, tinted with the user's own accent colour rather than a
+   fixed blue — `--interactive-accent` already flips sensibly in both
+   themes. */
+.weekfit-grid__col--today {
+  background: var(--background-primary-alt); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--interactive-accent) 6%, transparent);
+}
+
+.weekfit-grid__colhead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  padding: 4px 6px;
+  min-height: 34px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.weekfit-grid__dow {
+  font-size: 0.72em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.weekfit-grid__date {
+  font-size: 0.95em;
+  color: var(--text-normal);
+}
+
+.weekfit-grid__col--today .weekfit-grid__dow,
+.weekfit-grid__col--today .weekfit-grid__date {
+  color: var(--text-accent);
+}
+
+.weekfit-grid__chip {
+  flex-basis: 100%;
+  font-size: 0.68em;
+  padding: 1px 5px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.weekfit-grid__body {
+  position: relative;
+  flex: 1 1 auto;
+}
+
+.weekfit-grid__line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px solid var(--background-modifier-border);
+  pointer-events: none;
+}
+
+.weekfit-grid__line--half {
+  border-top-color: var(--background-modifier-border); /* fallback: no color-mix */
+  border-top-color: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
+}
+
+/* Recurring structure from settings.blocks — background only, behind
+   everything else, and pointer-events: none since Phase 1 is read-only and
+   these aren't interactive even later (WeekViewRoot §2). */
+.weekfit-sk {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-left: 3px solid var(--text-faint);
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--text-muted);
+  font-size: 0.65em;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 4px;
+  overflow: hidden;
+  border-radius: var(--radius-s);
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* Scheduled events — Day Planner lines already in the vault. Phase 2C makes
+   these interactive (drag to re-time, click to open the source line), but
+   the styling stays deliberately plain next to `.weekfit-ghost` below —
+   solid border, full opacity, no dash — so a committed block never reads as
+   provisional the way a ghost does. */
+.weekfit-ev {
+  position: absolute;
+  left: 8px;
+  right: 4px;
+  background: var(--background-secondary);
+  border-left: 3px solid var(--interactive-accent);
+  border-radius: var(--radius-s);
+  padding: 3px 7px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  z-index: 2;
+  cursor: grab;
+  touch-action: none;
+}
+
+/* On hover/keyboard-focus only: lets `.weekfit-ev__unschedule` show past the
+   block's own edge on a very short (tight) block without permanently
+   changing how the block clips its own text the rest of the time. */
+.weekfit-ev:hover,
+.weekfit-ev:focus-within {
+  overflow: visible;
+  z-index: 5;
+}
+
+.weekfit-ev--dragging {
+  cursor: grabbing;
+  box-shadow: 0 2px 6px var(--background-modifier-box-shadow);
+}
+
+.weekfit-ev__unschedule {
+  position: absolute;
+  bottom: 2px;
+  right: 4px;
+  background: var(--background-primary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--background-primary) 70%, var(--background-secondary));
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  font-size: 0.62em;
+  line-height: 1;
+  padding: 1px 5px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.1s ease;
+}
+
+/* Plain language on purpose ("Unschedule", never a bare ✕) — visible on
+   hover for a mouse, and on focus for a keyboard user tabbing through the
+   block's controls, rather than shown all the time and cluttering every
+   block on the board. */
+.weekfit-ev:hover .weekfit-ev__unschedule,
+.weekfit-ev__unschedule:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.weekfit-ev__unschedule:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+
+.weekfit-ev--tight {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 7px;
+}
+
+.weekfit-ev__time {
+  font-size: 0.68em;
+  color: var(--text-accent);
+  flex: none;
+}
+
+.weekfit-ev__title {
+  font-size: 0.78em;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.weekfit-ev__ses {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 0.62em;
+  color: var(--text-accent);
+  pointer-events: none;
+}
+
+/* Now-line — the one place crimson (`--color-red`) is used for "this instant",
+   same convention the desktop app used. */
+.weekfit-nowline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 2px solid var(--color-red);
+  z-index: 3;
+  pointer-events: none;
+}
+
+/* ---------- Rail: the unscheduled task list ---------- */
+
+.weekfit-rail {
+  width: 260px;
+  flex: none;
+  overflow-y: auto;
+  border-left: 1px solid var(--background-modifier-border);
+  padding: var(--size-4-2);
+  background: var(--background-primary-alt);
+}
+
+.weekfit-rail__heading {
+  margin: 0 0 6px;
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.weekfit-rail__empty {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.weekfit-rail__empty code {
+  background: var(--background-secondary);
+  padding: 1px 4px;
+  border-radius: var(--radius-s);
+  font-size: 0.95em;
+}
+
+.weekfit-rail__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.weekfit-rail__item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-m);
+  background: var(--background-secondary);
+}
+
+.weekfit-rail__pri {
+  font-size: 0.85em;
+  line-height: 1;
+  flex: none;
+}
+
+.weekfit-rail__pri--highest,
+.weekfit-rail__pri--high {
+  color: var(--color-red);
+}
+
+.weekfit-rail__pri--medium {
+  color: var(--color-orange);
+}
+
+.weekfit-rail__pri--low,
+.weekfit-rail__pri--lowest {
+  color: var(--text-muted);
+}
+
+.weekfit-rail__title {
+  flex: 1 1 auto;
+  min-width: 60px;
+  font-size: 0.85em;
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+
+.weekfit-rail__due {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  flex: none;
+}
+
+/* The one other place crimson shows up in the rail — deliberately, since
+   the now-line already means "now" and overdue is the same idea pointed at
+   a task rather than a time. */
+.weekfit-rail__due--overdue {
+  color: var(--color-red);
+  font-weight: 600;
+}
+
+.weekfit-rail__est {
+  font-size: 0.72em;
+  color: var(--text-muted);
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* An explicit `~90m` on the line reads as a plain statement of fact. */
+.weekfit-rail__est--override {
+  color: var(--text-normal);
+}
+
+/* A size the plugin guessed — from a `#tag` default or the global fallback —
+   stays muted and picks up the `≈` marker below. This is the quiet-adoption
+   feature (Phase 1B §3): the user should always be able to tell "I said 90m"
+   apart from "the plugin guessed 90m" at a glance, without it shouting. */
+.weekfit-rail__est--kind,
+.weekfit-rail__est--default {
+  font-style: italic;
+}
+
+.weekfit-rail__est-guess {
+  margin-right: 1px;
+  opacity: 0.75;
+}
+
+/* ---------- Fit bar: the button, the capacity line ---------- */
+
+.weekfit-fitbar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--size-4-2);
+  border-bottom: 1px solid var(--background-modifier-border);
+  flex: none;
+}
+
+.weekfit-fitbar__row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  flex-wrap: wrap;
+}
+
+.weekfit-fitbar__fit {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+  border: none;
+  border-radius: var(--radius-s);
+  padding: 4px 12px;
+  font-size: 0.85em;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.weekfit-fitbar__fit:hover:not(:disabled) {
+  background: var(--interactive-accent-hover);
+}
+
+.weekfit-fitbar__fit:disabled {
+  cursor: progress;
+  opacity: 0.75;
+}
+
+.weekfit-fitbar__acceptall,
+.weekfit-fitbar__clear {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-normal);
+  padding: 3px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+
+.weekfit-fitbar__acceptall:hover,
+.weekfit-fitbar__clear:hover {
+  background: var(--background-modifier-hover);
+}
+
+.weekfit-fitbar__gaps {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 0.8em;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+/* The one line whose whole job is making over-commitment visible. Quiet by
+   default; only `--over` reaches for crimson (`--color-red`), same
+   convention as the now-line and the overdue marker in the rail. */
+.weekfit-capacity {
+  margin: 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.weekfit-capacity__figures {
+  color: var(--text-normal);
+  font-weight: 600;
+}
+
+.weekfit-capacity--over .weekfit-capacity__figures {
+  color: var(--color-red);
+}
+
+.weekfit-capacity__overby {
+  color: var(--color-red);
+  font-weight: 600;
+}
+
+.weekfit-capacity__nowindows {
+  font-style: italic;
+}
+
+/* ---------- Gap candidates: scenery, not controls ---------- */
+
+.weekfit-gap {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border: 1px dashed var(--text-faint);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--text-faint) 6%, transparent);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ---------- Ghost proposals: a suggestion, never a commitment ---------- */
+
+.weekfit-ghost {
+  position: absolute;
+  left: 8px;
+  right: 4px;
+  border: 1px dashed var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background: var(--background-primary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+  padding: 3px 7px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  opacity: 0.85;
+  z-index: 4;
+  cursor: grab;
+  touch-action: none;
+}
+
+.weekfit-ghost--dragging {
+  cursor: grabbing;
+  opacity: 0.95;
+  box-shadow: 0 2px 6px var(--background-modifier-box-shadow);
+}
+
+.weekfit-ghost--conflict {
+  border-color: var(--color-orange);
+}
+
+.weekfit-ghost__time {
+  font-size: 0.68em;
+  color: var(--text-accent);
+  flex: none;
+}
+
+.weekfit-ghost__title {
+  font-size: 0.78em;
+  color: var(--text-normal);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.weekfit-ghost__ses {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  font-size: 0.62em;
+  color: var(--text-accent);
+}
+
+.weekfit-ghost__conflict {
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  font-size: 0.7em;
+  color: var(--color-orange);
+}
+
+.weekfit-ghost__actions {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.weekfit-ghost__accept,
+.weekfit-ghost__dismiss {
+  border: none;
+  border-radius: var(--radius-s);
+  font-size: 0.62em;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+
+.weekfit-ghost__accept {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+
+.weekfit-ghost__accept:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.weekfit-ghost__dismiss {
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.weekfit-ghost__dismiss:hover {
+  color: var(--text-normal);
+}
+
+/* ---------- Unplaced tasks: the useful half of the answer ---------- */
+
+.weekfit-unplaced {
+  margin: 0 var(--size-4-2);
+  padding: 6px var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  flex: none;
+}
+
+.weekfit-unplaced__heading {
+  margin: 0 0 4px;
+  font-size: 0.72em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.weekfit-unplaced__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.weekfit-unplaced__item {
+  font-size: 0.82em;
+  color: var(--text-normal);
+}
+
+.weekfit-unplaced__title {
+  font-weight: 600;
+}
+
+.weekfit-unplaced__minutes {
+  color: var(--text-muted);
+  margin: 0 4px;
+}
+
+.weekfit-unplaced__reason {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+/* ---------- Write result: what actually landed on the vault ---------- */
+
+.weekfit-writeresult {
+  margin: var(--size-4-2) var(--size-4-2) 0;
+  padding: 6px var(--size-4-2);
+  border-radius: var(--radius-s);
+  font-size: 0.85em;
+  flex: none;
+}
+
+/* A refused write is a warning, not a hard error — amber rather than the
+   crimson already spoken for by "now" and "over budget". */
+.weekfit-notice--warning {
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--color-orange) 12%, var(--background-primary));
+  border: 1px solid var(--color-orange); /* fallback: no color-mix */
+  border: 1px solid color-mix(in srgb, var(--color-orange) 35%, transparent);
+}
+
+.weekfit-writeresult__list {
+  margin: 4px 0 0;
+  padding-left: 1.1em;
+}
+
+/* ---------- Settings tab: inline validation ---------- */
+
+.weekfit-settings-error {
+  color: var(--color-red);
+  font-size: 0.8em;
+  margin-top: 2px;
+}

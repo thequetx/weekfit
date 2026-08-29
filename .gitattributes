@@ -1,0 +1,9 @@
+# Keep the repo LF everywhere, whatever the checkout platform.
+* text=auto eol=lf
+
+# ...except this fixture, which is CRLF *on purpose*: test/smoke.test.ts
+# asserts that a write preserves CRLF line endings, so normalising it on
+# checkout would quietly break that test on a fresh clone. `-text` means
+# "never convert". Matched by wildcard because gitattributes patterns can't
+# escape the space in the filename.
+**/CRLF*.md -text

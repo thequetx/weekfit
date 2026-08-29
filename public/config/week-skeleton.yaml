@@ -1,0 +1,108 @@
+# Recurring structure the Week Dashboard lays the plan around.
+# Rendered as background blocks in the planner grid; NOT tasks.
+# Source: Google Calendar tylerawre@gmail.com, read 2026-08-29.
+#
+# days: mon tue wed thu fri sat sun   |   times: 24h "HH:MM" local
+
+timezone: Australia/Sydney
+
+blocks:
+  - name: Gym
+    kind: gym
+    days: [mon, tue, wed, thu, fri]
+    start: "06:00"
+    end: "07:00"
+    note: "Wed is lighter (~30 min). Workout type rotates on a 2-week cycle."
+
+  - name: Twitch Stream
+    kind: stream
+    days: [mon, tue, thu, fri]
+    start: "18:30"
+    end: "21:30"
+
+  - name: Grocery Run
+    kind: errand
+    days: [sun]
+    start: "14:00"
+    end: "15:00"
+    note: "Currently a single calendar event, not a recurring series — treated as weekly."
+
+  - name: Meal Prep — Batch Cook
+    kind: meal-prep
+    days: [sun]
+    start: "15:00"
+    end: "17:00"
+
+  # Content/editing time is intentionally NOT a block — the dashboard should
+  # surface open gaps as candidate slots instead (decided 2026-08-29).
+
+# How long a task takes, by the #tag written on its line. This is rung A of the
+# duration ladder: it gives *every* task a size, including the plain
+# `- [ ] Book dentist` lines that carry no annotation at all.
+#
+#   `default` is the reserved global fallback (60m — the behaviour before this
+#   existed). Every other key is matched against the task's `#tags`, so
+#   `- [ ] Cut the Tuesday VOD #content` is 90 minutes.
+#
+# A single task can override the map with `~90m` / `~1.5h`, or the Dataview
+# flavour `[est:: 90m]`. Those beat this map; this map beats `default`.
+durations:
+  default: 60m
+  content: 90m
+  admin: 30m
+  errand: 45m
+  stream: 3h
+  gym: 60m
+  meal-prep: 2h
+
+# When work *could* go — the time map behind the open-gap engine (Phase 4 §2).
+# `blocks:` above is what already happens; this is what's available around it.
+# The engine subtracts the blocks and the real calendar from these ranges and
+# what's left over is a candidate slot.
+#
+#   min_block  the shortest interval worth proposing in this window. A
+#              20-minute sliver of a deep-work morning isn't deep work, so it
+#              is dropped rather than offered (and doesn't count as free time).
+#
+# A window's `name` is also matched against the `#tag`s on a task line, so
+# `- [ ] Cut the Tuesday VOD #content` prefers a `content` window over an
+# equally early `admin` one. Names may repeat — Saturday's content window is a
+# separate entry from Wednesday's.
+#
+# Seeded from Backlog.md: "weekday mornings after 07:00, weekday afternoons
+# before 18:30, Wednesday evenings, and most of Saturday + Sunday morning."
+windows:
+  # Weekday mornings, from the end of the 06:00 gym to lunch.
+  - name: deep
+    days: [mon, tue, wed, thu, fri]
+    start: "07:00"
+    end: "12:00"
+    min_block: 60
+
+  # Weekday afternoons, up to the 18:30 stream.
+  - name: admin
+    days: [mon, tue, wed, thu, fri]
+    start: "12:00"
+    end: "18:30"
+    min_block: 30
+
+  # Wednesday evening — the one weeknight with no stream.
+  - name: content
+    days: [wed]
+    start: "18:30"
+    end: "21:30"
+    min_block: 45
+
+  # Most of Saturday.
+  - name: content
+    days: [sat]
+    start: "09:00"
+    end: "18:00"
+    min_block: 45
+
+  # Sunday morning, before the 14:00 grocery run.
+  - name: errands
+    days: [sun]
+    start: "09:00"
+    end: "14:00"
+    min_block: 30
