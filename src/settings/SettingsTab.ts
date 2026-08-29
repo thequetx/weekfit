@@ -111,6 +111,35 @@ export class SettingsTab extends PluginSettingTab {
     };
 
 
+    // --- getting started ---------------------------------------------
+    //
+    // Availability windows are the one setting with no sensible universal
+    // default, and nothing in the plugin works without one — so a first run
+    // that says nothing here is a first run that looks broken. This block
+    // shows only while there is genuinely nothing configured, and gets out of
+    // the way permanently once there is.
+    if (settings.windows.length === 0) {
+      new Setting(containerEl).setName('Getting started').setHeading();
+      const intro = containerEl.createEl('div', { cls: 'setting-item-description' });
+      intro.createEl('p', {
+        text:
+          'Weekfit needs to know when work could happen before it can fit anything. ' +
+          'Add at least one availability window below — weekdays 09:00 to 17:00, say.',
+      });
+      const steps = intro.createEl('ol');
+      steps.createEl('li', { text: 'Add an availability window: when work could happen.' });
+      steps.createEl('li', {
+        text: 'Optionally add recurring commitments, so they count as busy.',
+      });
+      steps.createEl('li', {
+        text: 'Run "Weekfit: Create this week’s note" from the command palette.',
+      });
+      steps.createEl('li', {
+        text: 'Put anything under ## Tasks — a plain "- [ ] Book dentist" is enough.',
+      });
+      steps.createEl('li', { text: 'Open the week view and press "Fit this week".' });
+    }
+
     // --- note mode ---------------------------------------------------
     new Setting(containerEl)
       .setName('Where tasks live')

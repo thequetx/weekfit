@@ -122,6 +122,7 @@ function renderRoot(overrides: Partial<WeekViewRootProps> = {}) {
     onDismiss: noop,
     onMoveProposal: noop,
     onToggleGaps: noop,
+    onCreateWeekNote: noop,
     onMoveBlock: noop,
     onUnschedule: noop,
     onOpenSource: noop,
@@ -140,9 +141,25 @@ describe('WeekViewRoot — loading', () => {
 });
 
 describe('WeekViewRoot — empty / error states', () => {
-  it('shows a quiet empty state when notePath is null, without throwing', () => {
+  it('shows a teaching empty state when notePath is null, without throwing', () => {
     expect(() => renderRoot({ snapshot: snapshot({ notePath: null }) })).not.toThrow();
-    expect(screen.getByText('No weekly note for this week yet.')).toBeInTheDocument();
+    expect(screen.getByText('Nothing here yet for this week.')).toBeInTheDocument();
+    // The empty state has to offer the next action, not just report the
+    // absence — a fresh vault otherwise leaves the user to work out that a
+    // three-heading note is what's missing.
+    expect(screen.getByRole('button', { name: /create this week/i })).toBeInTheDocument();
+  });
+
+  it('the empty state’s button asks the plugin to seed the note', () => {
+    const onCreateWeekNote = vi.fn();
+    renderRoot({ snapshot: snapshot({ notePath: null }), onCreateWeekNote });
+    fireEvent.click(screen.getByRole('button', { name: /create this week/i }));
+    expect(onCreateWeekNote).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when no availability window is configured, since nothing can be fitted', () => {
+    renderRoot({ settings: { ...DEFAULT_SETTINGS, windows: [] } });
+    expect(screen.getByText(/no availability windows set/i)).toBeInTheDocument();
   });
 
   // The daily-notes case. `notePath` reports whether the *weekly* note exists

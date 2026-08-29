@@ -10,6 +10,24 @@ drag what you don't, and it writes plain text back into your notes.
 
 ---
 
+## Getting started
+
+1. **Install and enable** Weekfit.
+2. **Settings → Weekfit → add an availability window** — *when* work could happen, e.g.
+   weekdays 09:00–17:00. This is the one setting with no sensible default: without it
+   there is nowhere to fit anything, and Weekfit says so rather than sitting there
+   looking broken.
+3. *(Optional)* add your **recurring commitments** — gym, stream, a standing meeting.
+   They're drawn behind the week and treated as busy.
+4. *(Optional)* set **durations by tag**, so untagged, unestimated tasks still get a size.
+5. Run **`Weekfit: Create this week's note`** from the command palette (`Ctrl/Cmd+P`).
+   You get a note with three sections and nothing else to learn.
+6. Put anything under `## Tasks`. A plain `- [ ] Book dentist` is enough.
+7. Open the week view and press **Fit this week**.
+
+You'll get **ghosts** — proposals, not commitments. Accept one, accept all, dismiss, or
+drag one somewhere else first. **Nothing is written until you accept.**
+
 ## It works with the tasks you already have. No new syntax required.
 
 This is the part most planners get wrong. Every comparable plugin needs you to annotate
@@ -23,8 +41,8 @@ Weekfit doesn't. A plain line works on day one:
 ```
 
 It gets a size from a **duration default for its `#tag`**, or a global fallback if it
-hasn't got one. Nothing to migrate, nothing to learn, and the rail tells you the
-difference between a size you wrote and a size Weekfit guessed.
+hasn't got one. Nothing to migrate, nothing to learn, and the rail marks a size Weekfit
+guessed differently from one you wrote.
 
 If you *do* annotate, Weekfit reads the [Obsidian Tasks](https://publish.obsidian.md/tasks/)
 standard in **both** flavours — emoji and Dataview inline fields — plus a `~90m` duration
@@ -53,48 +71,62 @@ still sitting in your notes in a format three other tools understand.
 
 **Your plan is a file, not a service.**
 
-## What it does that others don't
+## What it does
 
-| | Weekfit |
+| | |
 |---|---|
-| **Schedules for you** — into free slots, not just drag-and-drop | ✅ |
-| **Availability windows** — *when could this kind of work happen* | ✅ |
-| **Recurring commitments** drawn behind the week | ✅ |
-| **Capacity line** — `6.5h committed / 14h free`, red when over | ✅ |
-| **Duration defaults per `#tag`** — works on an un-annotated vault | ✅ |
-| Google Calendar sync | ❌ deliberately — see below |
+| **Fit this week** | Schedules unscheduled work into your free slots. Nothing else in the directory does this |
+| **Availability windows** | *When could this kind of work happen* — matched against a task's `#tag` |
+| **Recurring commitments** | Drawn behind the week and treated as busy |
+| **Capacity line** | `6.5h committed / 14h free`, red when the week doesn't fit |
+| **Duration defaults per `#tag`** | Works on a vault where nothing is annotated |
+| **Drag and edge-resize** | Move a block, or drag its edge to change how long it takes |
+| **Conflict marking** | Says when a hand-placed block lands on a commitment — marks it, never refuses it |
+| **Splitting** | A task too big for one gap becomes several sittings, written as sub-tasks |
+| **Replan** | Re-fits what didn't happen. The feature that makes this useful on a Wednesday |
+| **Weekly review** | Planned vs kept, plus frontmatter an Obsidian Bases table can read |
+| **Roll forward** | Carries unfinished work into next week, keeping every annotation |
+| **Backlog + capture** | Somewhere for later, and a one-line way to get things there |
 
-## How it works
+## How your notes are treated
 
-1. **Set your availability windows** in Settings — *when* work could happen (e.g.
-   weekdays 09:00–17:00). Without at least one, there's nowhere to fit anything.
-2. **Add your recurring commitments** — the gym, a stream, a standing meeting. These are
-   drawn behind the week and treated as busy.
-3. **Set duration defaults by tag**, so untagged and unestimated tasks still get a size.
-4. Open the week view and press **Fit this week**.
-5. You get **ghosts** — proposals, not commitments. Accept one, accept all, dismiss, or
-   drag one to a different slot first. Nothing is written until you accept.
-6. Accepting writes the time range onto the task's own line. **Nothing else is written.**
+This is the part worth trusting before you install anything that writes to your vault.
 
-Tasks come from your weekly note's `## Tasks` section, your daily notes, and any
-`- [ ]` line tagged `#thisweek` anywhere in the folders you point it at.
+- **One module writes.** Every change — accept, re-time, resize, unschedule, roll forward
+  — goes through a single verified path. A test gate asserts no other file can touch the
+  vault.
+- **It re-reads the line before changing it.** If the line moved or changed since Weekfit
+  last looked, the write is **refused and reported**, never guessed at.
+- **Only the target line changes.** No reformatting, no whitespace churn, no touching the
+  final newline. Your line endings are preserved as they are, CRLF included.
+- **Nothing proprietary is written.** A time range and a scheduled date, both standard
+  Tasks syntax, in whichever flavour the line already uses.
+- **`Create this week's note` refuses to overwrite.** It is a seed, never a reset.
+- **Recurring tasks are left alone.** A `🔁` line belongs to the Tasks plugin; Weekfit
+  never moves or rewrites one.
+
+## Commands
+
+| Command | |
+|---|---|
+| `Open week view` | Opens the week |
+| `Fit this week` | Proposes placements for everything unscheduled |
+| `Replan what has passed` | Re-fits blocks that came and went undone |
+| `Review this week` | Planned vs kept, and roll unfinished work forward |
+| `Capture a task` | One line, into this week's `## Tasks` |
+| `Open backlog` | Unscheduled work across your configured folders |
+| `Create this week's note` | Seeds the note with the three sections |
+| `Previous week` / `Next week` / `Go to this week` | Navigation |
+| `Toggle gap candidates` | Shows the free slots the engine can see |
+| `Refresh week` | Re-reads the vault |
+
+No hotkeys are claimed — bind your own in Settings → Hotkeys.
 
 ### Where your notes live
 
 Weekfit defers to the **Periodic Notes** plugin when you have it installed, and to core
 Daily Notes after that, rather than inventing a second note-location setting for you to
 keep in sync. You can override it.
-
-## Commands
-
-| Command | What it does |
-|---|---|
-| `Open week view` | Opens the week |
-| `Fit this week` | Proposes placements for everything unscheduled |
-| `Toggle gap candidates` | Shows the free slots the engine can see |
-| `Refresh week` | Re-reads the vault |
-
-No hotkeys are claimed — bind your own in Settings → Hotkeys.
 
 ## What it deliberately doesn't do
 
@@ -103,21 +135,22 @@ No hotkeys are claimed — bind your own in Settings → Hotkeys.
   verification exists to police. Dropping it removes the verification burden, the
   "unverified app" screen and the 100-user cap in one decision. A read-only ICS URL is the
   likely first step if calendar support is wanted.
-- **No AI.** Not in this version, and everything here works with every model switched off.
+- **No AI.** Everything here works with every model switched off.
 - **No account, no server, no telemetry.** It reads and writes files in your vault.
 - **No task format of its own.** It reads the Obsidian Tasks standard and writes a time
   range and a scheduled date — both standard, both readable by other plugins and by you.
+- **It never edits your estimates.** `~90m` is how big a job is; `09:00 - 10:30` is when
+  it's happening. Resizing a block changes the second, never the first.
 
 ## Status
 
-**Phases 0–2 of the build are complete**: the planning engine, the vault adapter, the week
-view, and "Fit this week" with its write path. 546 tests pass — unit, component, and an
-end-to-end pass that runs the real read → fit → write pipeline against real markdown
-files on disk and asserts the resulting bytes.
+**Not yet released.** Phases 0–4 of the build are complete: the planning engine, the vault
+adapter, the week view, fitting and its write path, splitting, replan, review, backlog and
+capture. **706 tests**, including component tests and an end-to-end pass that runs the real
+read → fit → write pipeline against real files on disk and asserts the resulting bytes.
 
-⚠️ **Not yet released, and not yet verified inside a running Obsidian.** A green test
-suite is not evidence that a view renders — until someone has loaded this in the app and
-looked at it, treat "it works" as unproven. No screenshot exists yet for the same reason.
+⚠️ Drag and resize arithmetic is covered by tests with stubbed geometry, but no automated
+test can confirm how they feel in a real pane. No screenshot exists yet.
 
 ## Development
 

@@ -356,7 +356,12 @@ export default class WeekfitPlugin extends Plugin {
       );
     }
     if (truncated) new Notice('Weekfit: backlog is showing the first 300 tasks found.');
-    for (const e of errors) console.warn(e);
+    // One line, not one per file: a vault with a folder full of unreadable
+    // notes would otherwise bury the user in Notices. Silence would be worse
+    // — a backlog quietly missing entries looks like the sweep working.
+    if (errors.length) {
+      new Notice(`Weekfit: ${errors.length} file(s) could not be read for the backlog.`);
+    }
 
     const items = collectBacklog(tasks, this.settings);
     for (const leaf of leaves) {
@@ -612,6 +617,7 @@ export default class WeekfitPlugin extends Plugin {
           onMoveProposal: (groupKey: string, day: number, startMin: number) =>
             this.moveProposal(groupKey, day, startMin),
           onToggleGaps: () => void this.toggleGaps(),
+          onCreateWeekNote: () => void this.createWeekNote(),
           onPrevWeek: () => void this.goToWeek(addWeeks(this.weekStart, -1)),
           onNextWeek: () => void this.goToWeek(addWeeks(this.weekStart, 1)),
           onToday: () => void this.goToWeek(new Date()),

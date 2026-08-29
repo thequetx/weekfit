@@ -43,6 +43,8 @@ export interface WeekViewRootProps {
   onDismiss: (groupKey: string) => void;
   onMoveProposal: (groupKey: string, day: number, startMin: number) => void;
   onToggleGaps: () => void;
+  /** Seed the week’s note from the empty state. */
+  onCreateWeekNote: () => void;
   // --- Phase 2C: manipulating a block already on the grid ------------------
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
@@ -99,6 +101,7 @@ export function WeekViewRoot({
   onDismiss,
   onMoveProposal,
   onToggleGaps,
+  onCreateWeekNote,
   onMoveBlock,
   onUnschedule,
   onOpenSource,
@@ -205,10 +208,33 @@ export function WeekViewRoot({
         snapshot.tasks.length === 0 &&
         snapshot.thisweek.length === 0 &&
         snapshot.scheduled.length === 0 && (
-          <p className="weekfit-notice weekfit-notice--quiet">
-            No weekly note for this week yet.
-          </p>
+          // The day-one wall, and the one place worth teaching rather than
+          // just reporting. Saying "no weekly note" and stopping leaves the
+          // user to work out that they now need a file with three particular
+          // headings before anything happens. The button writes it.
+          <div className="weekfit-empty">
+            <p className="weekfit-empty__lead">Nothing here yet for this week.</p>
+            <button type="button" className="weekfit-empty__action" onClick={onCreateWeekNote}>
+              Create this week&rsquo;s note
+            </button>
+            <p className="weekfit-empty__hint">
+              It gets three sections &mdash; <code>## Intentions</code>, <code>## Tasks</code> and{' '}
+              <code>## Review</code>. Put anything under <code>## Tasks</code>, even a plain{' '}
+              <code>- [ ] Book dentist</code>, then press <strong>Fit this week</strong>.
+            </p>
+          </div>
         )}
+
+      {/* Fitting is the whole point of the plugin, and it can do nothing at
+          all without a window. Better said here, where someone is looking at
+          an empty board wondering why, than only in a Notice they may have
+          already dismissed. */}
+      {settings.windows.length === 0 && (
+        <p className="weekfit-notice weekfit-notice--quiet">
+          No availability windows set, so there is nowhere to fit anything. Add one in Settings
+          &rarr; Weekfit &mdash; it is the one setting with no sensible default.
+        </p>
+      )}
 
       {showErrors && (
         <div className="weekfit-notice weekfit-notice--error" role="alert">
