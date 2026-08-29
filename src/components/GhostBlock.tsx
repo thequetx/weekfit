@@ -16,9 +16,11 @@ export interface GhostBlockProps {
   dragging: boolean;
   onAccept: (groupKey: string) => void;
   onDismiss: (groupKey: string) => void;
+  /** Starts the drag. `WeekGrid` takes it from here — once a drag is live it
+   *  tracks pointermove/pointerup/pointercancel on `window`, not on this
+   *  element (a React pointermove/up prop here would only fire while the
+   *  cursor stayed over the ghost, which is the bug this replaced). */
   onDragStart: (proposal: Proposal, e: PointerEvent<HTMLDivElement>) => void;
-  onDragMove: (proposal: Proposal, e: PointerEvent<HTMLDivElement>) => void;
-  onDragEnd: (proposal: Proposal, e: PointerEvent<HTMLDivElement>) => void;
 }
 
 /**
@@ -32,9 +34,12 @@ export interface GhostBlockProps {
  *
  * Dragging uses pointer events with explicit capture (`setPointerCapture` in
  * `onDragStart`, released implicitly on pointerup/cancel) rather than HTML5
- * drag-and-drop, which behaves badly inside an Obsidian pane. The Accept and
- * Dismiss buttons stop their own `pointerdown` from bubbling up to the ghost's
- * handler, so clicking either can never be misread as the start of a drag.
+ * drag-and-drop, which behaves badly inside an Obsidian pane. Only the
+ * initiating `pointerdown` is handled here — `WeekGrid` tracks the rest of
+ * the drag on `window` rather than this element, so it keeps tracking even
+ * once the cursor leaves the ghost. The Accept and Dismiss buttons stop
+ * their own `pointerdown` from bubbling up to the ghost's handler, so
+ * clicking either can never be misread as the start of a drag.
  */
 export function GhostBlock({
   proposal,
@@ -44,8 +49,6 @@ export function GhostBlock({
   onAccept,
   onDismiss,
   onDragStart,
-  onDragMove,
-  onDragEnd,
 }: GhostBlockProps) {
   const top = yForMinutes(startMin);
   const height = Math.max(yForMinutes(endMin) - top, 20);
@@ -70,9 +73,6 @@ export function GhostBlock({
       aria-label={label}
       title={conflictLabel ?? label}
       onPointerDown={(e) => onDragStart(proposal, e)}
-      onPointerMove={(e) => onDragMove(proposal, e)}
-      onPointerUp={(e) => onDragEnd(proposal, e)}
-      onPointerCancel={(e) => onDragEnd(proposal, e)}
     >
       <span className="weekfit-ghost__time">
         {fmtMinutes(startMin)}–{fmtMinutes(endMin)}

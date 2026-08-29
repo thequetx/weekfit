@@ -16,9 +16,11 @@ export interface EventBlockProps {
   endMin: number;
   dragging: boolean;
   onUnschedule: (uid: string) => void;
+  /** Starts the drag. `WeekGrid` takes it from here — once a drag is live it
+   *  tracks pointermove/pointerup/pointercancel on `window`, not on this
+   *  element (a React pointermove/up prop here would only fire while the
+   *  cursor stayed over the block, which is the bug this replaced). */
   onDragStart: (ev: CalEvent, e: PointerEvent<HTMLDivElement>) => void;
-  onDragMove: (ev: CalEvent, e: PointerEvent<HTMLDivElement>) => void;
-  onDragEnd: (ev: CalEvent, e: PointerEvent<HTMLDivElement>) => void;
 }
 
 /**
@@ -44,7 +46,8 @@ export function eventMinutes(ev: CalEvent): { startMin: number; endMin: number }
  *    with explicit capture, a 4px threshold separating a drag from a click.
  *    The threshold and the actual re-timing math live in `WeekGrid`, which
  *    owns the drag state for both real blocks and ghosts; this component only
- *    reports the raw pointer events upward.
+ *    reports the initiating `pointerdown` upward. `WeekGrid` tracks the rest
+ *    of the drag on `window`, not on this element.
  *  - **Unschedule**, a plain-language control (never a bare ✕, which reads as
  *    "delete") that hands the task back to the rail.
  *  - **Click opens the source line.** This component only forwards the raw
@@ -68,8 +71,6 @@ export function EventBlock({
   dragging,
   onUnschedule,
   onDragStart,
-  onDragMove,
-  onDragEnd,
 }: EventBlockProps) {
   // A `1/1` would be noise, so only a real split counts as linked.
   const linked = Boolean(ev.taskId && ev.session && ev.sessions && ev.sessions > 1);
@@ -87,9 +88,6 @@ export function EventBlock({
       role="group"
       aria-label={label}
       onPointerDown={(e) => onDragStart(ev, e)}
-      onPointerMove={(e) => onDragMove(ev, e)}
-      onPointerUp={(e) => onDragEnd(ev, e)}
-      onPointerCancel={(e) => onDragEnd(ev, e)}
     >
       <span className="weekfit-ev__time">{fmtClock(ev.start)}</span>
       <span className="weekfit-ev__title">{ev.title}</span>

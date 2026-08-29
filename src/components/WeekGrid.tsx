@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react';
-import type { PointerEvent } from 'react';
-import { bodyHeight, gridHours, minutesForY, yForMinutes } from '../lib/grid';
+import { useEffect, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import { bodyHeight, endHour, gridHours, minutesForY, startHour, yForMinutes } from '../lib/grid';
 import { DAY_NAMES, addDays, dayIndex, fmtHourLabel, fmtMinutes, sameDate } from '../lib/week';
 import type { CalEvent, SkeletonBlock } from '../lib/types';
 import type { Gap, Proposal } from '../lib/gaps';
@@ -51,6 +51,16 @@ interface DragState {
    *  (Accept/Dismiss already stop their own pointerdown from reaching here),
    *  not a drag — so it must not call `onMoveProposal` on release. */
   moved: boolean;
+  /**
+   * Minutes between where the pointer actually grabbed the block and the
+   * block's own `startMin`, captured at pointerdown. Every subsequent move
+   * subtracts this back off `minutesAt` so the block moves *with* the
+   * cursor instead of snapping so its top edge lands under it — without
+   * this a grab anywhere but the very top edge makes the block jump on
+   * pickup, and a jumped block is what "drifts down, hard to get the
+   * cursor back on it" (the reported bug) turned out to be.
+   */
+  grabOffsetMin: number;
 }
 
 interface Preview {
@@ -69,6 +79,8 @@ interface EventDragState {
   startClientX: number;
   startClientY: number;
   moved: boolean;
+  /** See `DragState.grabOffsetMin` — same idea, for a real block. */
+  grabOffsetMin: number;
 }
 
 interface EventPreview {
@@ -87,8 +99,13 @@ interface EventPreview {
  *
  * Dragging (a ghost or a real block) is pointer events, not HTML5
  * drag-and-drop (which behaves badly inside an Obsidian pane): `onPointerDown`
- * captures the pointer, `onPointerMove` recomputes a live preview position
- * from the cursor, and `onPointerUp` resolves the drop. A real block additionally
+ * on the block starts the drag and captures the pointer, but `pointermove` /
+ * `pointerup` / `pointercancel` are then listened for on `window` rather than
+ * the block element (see the `useEffect` below) — a React `onPointerMove`
+ * prop on the block only fires while the pointer stays over it, and
+ * `setPointerCapture` alone wasn't holding in practice, which is what let a
+ * fast or upward drag lose tracking entirely. `window` always sees the
+ * event regardless of what's under the cursor. A real block additionally
  * has to tell a click from a drag, since clicking (not dragging) it opens the
  * vault line it came from — `moved` on its drag state is exactly the ghost's
  * own click/drag distinction, reused for the same reason.
@@ -134,6 +151,12 @@ export function WeekGrid({
   const [preview, setPreview] = useState<Preview | null>(null);
   const eventDragRef = useRef<EventDragState | null>(null);
   const [eventPreview, setEventPreview] = useState<EventPreview | null>(null);
+  // Which drag (if any) window's pointer listeners are currently wired up
+  // for — null the rest of the time. State, not a ref, because attaching and
+  // detaching `window` listeners is a side effect that has to run from
+  // `useEffect`, and `useEffect` only re-fires when a *state* value it reads
+  // changes.
+  const [dragKind, setDragKind] = useState<'ghost' | 'event' | null>(null);
 
   function dayAt(clientX: number): number {
     let bestIdx = 0;
@@ -162,43 +185,80 @@ export function WeekGrid({
     return minutesForY(clientY - r.top);
   }
 
-  function handleDragStart(proposal: Proposal, e: PointerEvent<HTMLDivElement>) {
+  /**
+   * Where a block's top edge should land given where the pointer is *now*,
+   * preserving where inside the block it was originally grabbed.
+   *
+   * `minutesAt` alone reports the minute under the cursor — using that
+   * directly as the block's start (the old bug) pins whatever point you
+   * grabbed to the top edge, so the block jumps on pickup. Subtracting
+   * `grabOffsetMin` (captured at pointerdown — see `DragState`) undoes that:
+   * the block moves by exactly as much as the pointer does.
+   *
+   * The result is snapped to the 30-minute lattice — `grabOffsetMin` itself
+   * is rarely a multiple of 30 (a real event can start at :17), so the raw
+   * subtraction usually isn't either — and then clamped so a block can never
+   * be dragged off the top or bottom of the grid.
+   */
+  function grabAdjustedStart(
+    day: number,
+    clientY: number,
+    grabOffsetMin: number,
+    durationMin: number,
+  ): number {
+    const raw = minutesAt(day, clientY) - grabOffsetMin;
+    const snapped = snapToGrid(raw);
+    const minStart = startHour * 60;
+    const maxStart = Math.max(minStart, endHour * 60 - durationMin);
+    return Math.min(Math.max(snapped, minStart), maxStart);
+  }
+
+  function handleDragStart(proposal: Proposal, e: ReactPointerEvent<HTMLDivElement>) {
     // Optional chaining: real browsers all implement this, but jsdom (the
-    // component test environment) doesn't, and a capture that silently
-    // doesn't happen there is harmless — the drag state machine below doesn't
-    // depend on it, only on the pointer events actually arriving.
+    // component test environment) doesn't. Kept as belt-and-braces, but
+    // correctness never depends on it holding — window listeners (below) are
+    // what actually keep the drag tracking regardless of what's under the
+    // cursor.
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    const day = dayAt(e.clientX);
     dragRef.current = {
       proposal,
       startClientX: e.clientX,
       startClientY: e.clientY,
       moved: false,
+      grabOffsetMin: minutesAt(day, e.clientY) - proposal.startMin,
     };
+    setDragKind('ghost');
   }
 
-  function handleDragMove(proposal: Proposal, e: PointerEvent<HTMLDivElement>) {
+  // Listened for on `window`, not the ghost element — see the doc comment on
+  // `WeekGrid` and the `useEffect` below. Native `PointerEvent`s, not React's
+  // synthetic ones, since `window.addEventListener` is what delivers them.
+  function handleWindowDragMove(e: PointerEvent) {
     const drag = dragRef.current;
-    if (!drag || drag.proposal.key !== proposal.key) return;
+    if (!drag) return;
     const dx = e.clientX - drag.startClientX;
     const dy = e.clientY - drag.startClientY;
     if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     drag.moved = true;
     const day = dayAt(e.clientX);
-    setPreview({ key: proposal.key, day, startMin: minutesAt(day, e.clientY) });
+    const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, drag.proposal.minutes);
+    setPreview({ key: drag.proposal.key, day, startMin });
   }
 
-  function handleDragEnd(proposal: Proposal, e: PointerEvent<HTMLDivElement>) {
+  function handleWindowDragEnd(e: PointerEvent) {
     const drag = dragRef.current;
     dragRef.current = null;
+    setDragKind(null);
     setPreview(null);
-    if (!drag || drag.proposal.key !== proposal.key || !drag.moved) return;
+    if (!drag || !drag.moved) return;
 
     const day = dayAt(e.clientX);
-    const startMin = minutesAt(day, e.clientY);
+    const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, drag.proposal.minutes);
     // Nothing on that day fits -> leave the ghost exactly where it was: no
     // callback, no fallback to another day. See lib/gaps.ts `snapToGap`.
-    const snapped = snapToGap(gapList, day, startMin, proposal.minutes);
-    if (snapped) onMoveProposal(proposal.groupKey, snapped.gap.day, snapped.startMin);
+    const snapped = snapToGap(gapList, day, startMin, drag.proposal.minutes);
+    if (snapped) onMoveProposal(drag.proposal.groupKey, snapped.gap.day, snapped.startMin);
   }
 
   function positionOf(p: Proposal): { day: number; startMin: number; endMin: number } {
@@ -210,54 +270,63 @@ export function WeekGrid({
 
   // --- real blocks (Phase 2C): drag to re-time, click to open source -------
 
-  function handleEventDragStart(ev: CalEvent, e: PointerEvent<HTMLDivElement>) {
+  function handleEventDragStart(ev: CalEvent, e: ReactPointerEvent<HTMLDivElement>) {
     // See the matching comment in `handleDragStart` above.
     e.currentTarget.setPointerCapture?.(e.pointerId);
+    const day = dayAt(e.clientX);
+    const orig = eventMinutes(ev);
     eventDragRef.current = {
       ev,
       startClientX: e.clientX,
       startClientY: e.clientY,
       moved: false,
+      grabOffsetMin: minutesAt(day, e.clientY) - orig.startMin,
     };
+    setDragKind('event');
   }
 
-  function handleEventDragMove(ev: CalEvent, e: PointerEvent<HTMLDivElement>) {
+  // Listened for on `window` — see `handleWindowDragMove` above for why.
+  function handleWindowEventDragMove(e: PointerEvent) {
     const drag = eventDragRef.current;
-    if (!drag || drag.ev.uid !== ev.uid) return;
+    if (!drag) return;
     const dx = e.clientX - drag.startClientX;
     const dy = e.clientY - drag.startClientY;
     if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     drag.moved = true;
     const day = dayAt(e.clientX);
-    setEventPreview({ uid: ev.uid, day, startMin: minutesAt(day, e.clientY) });
+    const orig = eventMinutes(drag.ev);
+    const durationMin = Math.max(orig.endMin - orig.startMin, 1);
+    const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, durationMin);
+    setEventPreview({ uid: drag.ev.uid, day, startMin });
   }
 
-  function handleEventDragEnd(ev: CalEvent, e: PointerEvent<HTMLDivElement>) {
+  function handleWindowEventDragEnd(e: PointerEvent) {
     const drag = eventDragRef.current;
     eventDragRef.current = null;
+    setDragKind(null);
     setEventPreview(null);
-    if (!drag || drag.ev.uid !== ev.uid) return;
+    if (!drag) return;
 
     if (!drag.moved) {
       // Never crossed the threshold -> a click, not a drag. Opens the source
       // line instead of moving anything.
-      onOpenSource(ev.uid);
+      onOpenSource(drag.ev.uid);
       return;
     }
 
     const day = dayAt(e.clientX);
-    const startMin = minutesAt(day, e.clientY);
-    const orig = eventMinutes(ev);
+    const orig = eventMinutes(drag.ev);
     const durationMin = Math.max(orig.endMin - orig.startMin, 1);
+    const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, durationMin);
 
     if (gaps == null) {
       // "Fit this week" hasn't run, so there are no gaps to check legality
-      // against — `minutesAt` already rounds to the grid's 30-minute lattice
-      // via `minutesForY`, and `snapToGrid` makes that lattice explicit here,
-      // the same quantum a freshly-placed block snaps to everywhere else.
-      // Unlike the gap-aware path below, there's nothing to refuse against,
-      // so the move always lands.
-      onMoveBlock(ev.uid, day, snapToGrid(startMin));
+      // against — `grabAdjustedStart` already snapped to the grid's
+      // 30-minute lattice and clamped to the grid's bounds, the same
+      // treatment a freshly-placed block gets everywhere else. Unlike the
+      // gap-aware path below, there's nothing to refuse against, so the move
+      // always lands.
+      onMoveBlock(drag.ev.uid, day, startMin);
       return;
     }
 
@@ -265,7 +334,7 @@ export function WeekGrid({
     // does. Nothing on that day fits -> leave the block exactly where it
     // was — no callback at all, same discipline as a ghost's failed drop.
     const snapped = snapToGap(gaps, day, startMin, durationMin);
-    if (snapped) onMoveBlock(ev.uid, snapped.gap.day, snapped.startMin);
+    if (snapped) onMoveBlock(drag.ev.uid, snapped.gap.day, snapped.startMin);
   }
 
   /** Which day column `ev` currently belongs in — its own day, or the drag
@@ -285,6 +354,43 @@ export function WeekGrid({
     }
     return orig;
   }
+
+  // Wire pointermove/pointerup/pointercancel to `window` for exactly as long
+  // as a drag (ghost or real block) is in progress, and nowhere else — a
+  // listener left attached past the drag it belonged to is a leak, and in
+  // Obsidian a leaked `window` listener survives the pane that registered it
+  // being closed. Keying the effect on `dragKind` means React tears the old
+  // pair down and stands up the new one whenever a drag starts or ends, and
+  // the same cleanup function is what React runs on unmount, so a pane
+  // closed mid-drag can't leave anything behind either.
+  useEffect(() => {
+    if (dragKind === 'ghost') {
+      window.addEventListener('pointermove', handleWindowDragMove);
+      window.addEventListener('pointerup', handleWindowDragEnd);
+      window.addEventListener('pointercancel', handleWindowDragEnd);
+      return () => {
+        window.removeEventListener('pointermove', handleWindowDragMove);
+        window.removeEventListener('pointerup', handleWindowDragEnd);
+        window.removeEventListener('pointercancel', handleWindowDragEnd);
+      };
+    }
+    if (dragKind === 'event') {
+      window.addEventListener('pointermove', handleWindowEventDragMove);
+      window.addEventListener('pointerup', handleWindowEventDragEnd);
+      window.addEventListener('pointercancel', handleWindowEventDragEnd);
+      return () => {
+        window.removeEventListener('pointermove', handleWindowEventDragMove);
+        window.removeEventListener('pointerup', handleWindowEventDragEnd);
+        window.removeEventListener('pointercancel', handleWindowEventDragEnd);
+      };
+    }
+    return undefined;
+    // Only `dragKind` — every handler above closes over refs (mutated
+    // synchronously at pointerdown, before `dragKind` ever flips) and props
+    // read fresh at the moment the drag started, which is the behaviour the
+    // 4px-threshold click/drag distinction already assumes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragKind]);
 
   return (
     <div className="weekfit-grid">
@@ -389,8 +495,6 @@ export function WeekGrid({
                     dragging={eventPreview?.uid === e.uid}
                     onUnschedule={onUnschedule}
                     onDragStart={handleEventDragStart}
-                    onDragMove={handleEventDragMove}
-                    onDragEnd={handleEventDragEnd}
                   />
                 );
               })}
@@ -407,8 +511,6 @@ export function WeekGrid({
                     onAccept={onAccept}
                     onDismiss={onDismiss}
                     onDragStart={handleDragStart}
-                    onDragMove={handleDragMove}
-                    onDragEnd={handleDragEnd}
                   />
                 );
               })}

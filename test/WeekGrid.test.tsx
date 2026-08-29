@@ -1,0 +1,383 @@
+import '@testing-library/jest-dom/vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render } from '@testing-library/react';
+import { WeekGrid } from '../src/components/WeekGrid';
+import type { WeekGridProps } from '../src/components/WeekGrid';
+import { addDays } from '../src/lib/week';
+import type { CalEvent, SkeletonBlock } from '../src/lib/types';
+import type { Gap, Proposal } from '../src/lib/gaps';
+
+// vitest.config.ts doesn't run with `test.globals: true` for the `components`
+// project either — see the matching comment in rail.test.tsx / WeekViewRoot.test.tsx.
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+// Monday of a fixed week, local time — same convention as WeekViewRoot.test.tsx.
+const WEEK_START = new Date(2026, 7, 31);
+const NOW = new Date(2026, 7, 31, 8, 0);
+const WEDNESDAY = addDays(WEEK_START, 2);
+
+function calEvent(opts: Partial<CalEvent> & { start: Date; end: Date }): CalEvent {
+  return { uid: 'ev1', title: 'Event', allDay: false, ...opts };
+}
+
+function dateAt(day: Date, hours: number, minutes: number): Date {
+  const d = new Date(day);
+  d.setHours(hours, minutes, 0, 0);
+  return d;
+}
+
+function proposal(overrides: Partial<Proposal> = {}): Proposal {
+  return {
+    key: 'Weekly/2026-W36.md:5',
+    groupKey: 'Weekly/2026-W36.md:5',
+    kind: 'fit',
+    file: 'Weekly/2026-W36.md',
+    line: 5,
+    text: '- [ ] Write report ~90m',
+    title: 'Write report',
+    minutes: 90,
+    day: 2,
+    startMin: 570, // 09:30
+    endMin: 660, // 11:00
+    window: 'work',
+    ...overrides,
+  };
+}
+
+function baseProps(overrides: Partial<WeekGridProps> = {}): WeekGridProps {
+  return {
+    weekStart: WEEK_START,
+    now: NOW,
+    scheduled: [],
+    blocks: [] as SkeletonBlock[],
+    gaps: null,
+    showGaps: false,
+    proposals: [],
+    onAccept: vi.fn(),
+    onDismiss: vi.fn(),
+    onMoveProposal: vi.fn(),
+    onMoveBlock: vi.fn(),
+    onUnschedule: vi.fn(),
+    onOpenSource: vi.fn(),
+    ...overrides,
+  };
+}
+
+// jsdom gives every `getBoundingClientRect()` a 0x0 rect, which is exactly
+// why the grab-offset bug reached a user with 586 passing tests: every
+// arithmetic path that reads a rect silently computed with zeros and nothing
+// caught it. This stubs realistic geometry for the day columns and day
+// bodies so `dayAt`/`minutesAt` (and therefore the drag math) run for real.
+//
+//   - Column `di` spans clientX [di*COL_WIDTH, (di+1)*COL_WIDTH).
+//   - Every body starts at clientY = BODY_TOP (simulating a pane that has
+//     scrolled / has a header above the grid), matching `minutesForY`'s own
+//     coordinate system (`clientY - rect.top`).
+const COL_WIDTH = 100;
+const BODY_TOP = 40;
+
+function installGeometry(container: HTMLElement): void {
+  const cols = Array.from(container.querySelectorAll<HTMLElement>('.weekfit-grid__col'));
+  const bodies = Array.from(container.querySelectorAll<HTMLElement>('.weekfit-grid__body'));
+
+  function rect(x: number, y: number, width: number, height: number): DOMRect {
+    return {
+      x,
+      y,
+      width,
+      height,
+      top: y,
+      left: x,
+      right: x + width,
+      bottom: y + height,
+      toJSON() {
+        return this;
+      },
+    } as DOMRect;
+  }
+
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    const colIdx = cols.indexOf(this);
+    if (colIdx !== -1) return rect(colIdx * COL_WIDTH, 0, COL_WIDTH, 2000);
+    const bodyIdx = bodies.indexOf(this);
+    if (bodyIdx !== -1) return rect(bodyIdx * COL_WIDTH, BODY_TOP, COL_WIDTH, 2000);
+    return rect(0, 0, 0, 0);
+  });
+}
+
+function pointer(clientX: number, clientY: number, extra: Partial<PointerEvent> = {}) {
+  return { clientX, clientY, pointerId: 1, ...extra };
+}
+
+/** Dispatched on `window`, never the block — see the "tracks via window"
+ *  suite below for why that distinction is the whole point of this file. */
+function windowPointer(type: 'pointermove' | 'pointerup' | 'pointercancel', clientX: number, clientY: number) {
+  window.dispatchEvent(new PointerEvent(type, { clientX, clientY, pointerId: 1, bubbles: true }));
+}
+
+describe('WeekGrid — grab offset is preserved (the reported bug)', () => {
+  // Geometry: startHour=5 (300min), pxPerHour=46 (src/config.ts GRID).
+  // minutesForY(y) = round((y/46*60 + 300)/30)*30, clamped to [300, 1410].
+  // y=230  -> raw 600 (10:00) exactly, a lattice point.
+  // y=253  -> raw 630 (10:30) exactly, a lattice point.
+  // Using two already-on-lattice points isolates the grab-offset arithmetic
+  // from snapToGrid's own rounding, which is asserted separately below.
+  const Y_AT_10_00 = BODY_TOP + 230;
+  const Y_AT_10_30 = BODY_TOP + 253;
+  const DAY2_X = 250; // inside column 2's [200, 300) span -> Wednesday
+
+  it('a real block grabbed mid-block moves by the pointer delta, not to the pointer position', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:7',
+      start: dateAt(WEDNESDAY, 9, 30), // startMin 570
+      end: dateAt(WEDNESDAY, 10, 30), // endMin 630, duration 60
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    // Grab 30 minutes into the block (minutesAt=600 at pointerdown, block
+    // starts at 570 -> grabOffsetMin=30) rather than at its top edge.
+    fireEvent.pointerDown(block, pointer(DAY2_X, Y_AT_10_00));
+    // Regression guard for defect 2: pointermove/pointerup are dispatched on
+    // `window`, never the block. Against the old code (React onPointerMove/
+    // onPointerUp props on the block div) this event is invisible — a
+    // `window`-targeted PointerEvent never bubbles down into the block's
+    // subtree, so only a real `window.addEventListener` can observe it.
+    windowPointer('pointermove', DAY2_X, Y_AT_10_30);
+    windowPointer('pointerup', DAY2_X, Y_AT_10_30);
+
+    // The pointer moved by exactly 30 minutes (10:00 -> 10:30). The block
+    // must move by that same 30 minutes — from 570 to 600 — not jump to the
+    // pointer's absolute position (630), which is what the unfixed code did
+    // (see below).
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:7', 2, 600);
+  });
+
+  it('a ghost grabbed mid-block moves by the pointer delta, not to the pointer position', () => {
+    const onMoveProposal = vi.fn();
+    const gap: Gap = {
+      day: 2,
+      startMin: 300,
+      endMin: 1440,
+      minutes: 1140,
+      window: 'work',
+      windowIndex: 0,
+      minBlockMin: 30,
+    };
+    const p = proposal({ day: 2, startMin: 570, endMin: 660, minutes: 90 });
+    const { container } = render(
+      <WeekGrid {...baseProps({ gaps: [gap], proposals: [p], onMoveProposal })} />,
+    );
+    installGeometry(container);
+    const ghost = container.querySelector('.weekfit-ghost') as HTMLElement;
+
+    fireEvent.pointerDown(ghost, pointer(DAY2_X, Y_AT_10_00));
+    windowPointer('pointermove', DAY2_X, Y_AT_10_30);
+    windowPointer('pointerup', DAY2_X, Y_AT_10_30);
+
+    expect(onMoveProposal).toHaveBeenCalledTimes(1);
+    expect(onMoveProposal).toHaveBeenCalledWith('Weekly/2026-W36.md:5', 2, 600);
+  });
+});
+
+describe('WeekGrid — snaps to the 30-minute lattice', () => {
+  it('a start not already on the lattice is rounded to it', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:9',
+      start: dateAt(WEDNESDAY, 7, 15), // startMin 435 — off-lattice on purpose
+      end: dateAt(WEDNESDAY, 8, 0), // duration 45
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    // minutesForY(y)=450 (07:30) at pointerdown -> grabOffsetMin = 450-435 = 15.
+    // Solve precisely instead of eyeballing pixels: y such that
+    // minutesForY(y) = min, i.e. the inverse of minutesForY's rounding step:
+    // minutesForY(y) = round((y/46*60+300)/30)*30 => y = (min-300)/60*46.
+    const yFor = (min: number) => ((min - 300) / 60) * 46;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(450)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(480));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(480));
+
+    // raw = minutesAt(480) - grabOffsetMin(15) = 465, which snapToGrid rounds
+    // up to 480 (08:00) rather than leaving it at the off-lattice 465.
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:9', 2, 480);
+  });
+});
+
+describe('WeekGrid — a drag is clamped to the grid bounds', () => {
+  const yFor = (min: number) => ((min - 300) / 60) * 46;
+
+  it('cannot be pulled above the top of the grid', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:1',
+      start: dateAt(WEDNESDAY, 6, 0), // startMin 360
+      end: dateAt(WEDNESDAY, 7, 30), // duration 90
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    // Grab 60 minutes into the block (pointerdown at minute 420 -> offset 60).
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(420)));
+    // Fling the pointer far above the grid's top edge.
+    windowPointer('pointermove', 250, BODY_TOP - 5000);
+    windowPointer('pointerup', 250, BODY_TOP - 5000);
+
+    // minutesAt clamps to 300 (the grid's own floor) regardless of how far
+    // above it the pointer went; raw = 300 - 60 = 240, which is BELOW the
+    // grid floor once the offset is subtracted back out. The fix's own
+    // clamp (not just minutesForY's) must catch this and hold it at 300.
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:1', 2, 300);
+  });
+
+  it('cannot be pulled below the bottom of the grid', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:2',
+      start: dateAt(WEDNESDAY, 22, 30), // startMin 1350
+      end: dateAt(WEDNESDAY, 23, 30), // duration 60
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    // Grab at the block's own top edge (offset 0) for a clean bound check.
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(1350)));
+    // Fling the pointer far below the grid's bottom edge.
+    windowPointer('pointermove', 250, BODY_TOP + 100000);
+    windowPointer('pointerup', 250, BODY_TOP + 100000);
+
+    // endHour(24)*60 - duration(60) = 1380 is the latest legal start; the
+    // grid's own 1410 floor-of-the-last-half-hour must not win here.
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:2', 2, 1380);
+  });
+});
+
+describe('WeekGrid — drop legality (snapToGap)', () => {
+  const yFor = (min: number) => ((min - 300) / 60) * 46;
+
+  it('gaps === null: the move always lands, with no legality check', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:3',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(600));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(600));
+
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+  });
+
+  it('gaps present but snapToGap finds nothing: reverts, no callback', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:4',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    // A fit ran and found nothing free anywhere — an empty array, not null.
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: [], onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(600));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(600));
+
+    expect(onMoveBlock).not.toHaveBeenCalled();
+  });
+
+  it('gaps present but snapToGap finds nothing for a ghost either: reverts, no callback', () => {
+    const onMoveProposal = vi.fn();
+    const p = proposal();
+    const { container } = render(
+      <WeekGrid {...baseProps({ gaps: [], proposals: [p], onMoveProposal })} />,
+    );
+    installGeometry(container);
+    const ghost = container.querySelector('.weekfit-ghost') as HTMLElement;
+
+    fireEvent.pointerDown(ghost, pointer(250, BODY_TOP + yFor(600)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(660));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(660));
+
+    expect(onMoveProposal).not.toHaveBeenCalled();
+  });
+});
+
+describe('WeekGrid — click vs. drag on a real block', () => {
+  it('a plain click (no movement) opens the source, and does not move it', () => {
+    const onOpenSource = vi.fn();
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:11',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], onOpenSource, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, 100));
+    windowPointer('pointerup', 250, 100);
+
+    expect(onOpenSource).toHaveBeenCalledTimes(1);
+    expect(onOpenSource).toHaveBeenCalledWith('Weekly/2026-W36.md:11');
+    expect(onMoveBlock).not.toHaveBeenCalled();
+  });
+
+  it('a real drag (past the 4px threshold) does not open the source', () => {
+    const onOpenSource = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:12',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: null, onOpenSource })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, 100));
+    windowPointer('pointermove', 250, 140); // past the 4px threshold
+    windowPointer('pointerup', 250, 140);
+
+    expect(onOpenSource).not.toHaveBeenCalled();
+  });
+});

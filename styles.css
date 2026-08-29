@@ -325,6 +325,7 @@
   z-index: 2;
   cursor: grab;
   touch-action: none;
+  user-select: none;
 }
 
 /* On hover/keyboard-focus only: lets `.weekfit-ev__unschedule` show past the
@@ -660,6 +661,7 @@
   z-index: 4;
   cursor: grab;
   touch-action: none;
+  user-select: none;
 }
 
 .weekfit-ghost--dragging {
