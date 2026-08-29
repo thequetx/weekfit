@@ -33,6 +33,49 @@ function isFenceDelimiter(line: string): boolean {
 /** `true` at index `i` when line `i` is inside (or is) a fenced code block, so
  *  a stray `## heading`-looking comment or a `#thisweek`-looking string inside
  *  a code sample is never mistaken for the real thing. */
+/**
+ * Lines inside an HTML comment, which markdown renders as nothing and which a
+ * reader therefore reasonably expects to *be* nothing.
+ *
+ * Commenting a task out is how people defer one without deleting it, and the
+ * template Weekfit writes into a fresh weekly note puts its worked examples in
+ * a comment for exactly that reason. Without this, a brand-new vault's very
+ * first "Fit this week" would try to schedule the instructions — and anyone
+ * who ever parked a task behind `<!-- -->` would find it still being planned.
+ *
+ * Same shape as `fenceMask`: the delimiter lines count as inside, and a
+ * comment opened and closed on one line masks only that line. An unterminated
+ * comment masks to end of file, which matches how a renderer treats it.
+ */
+function commentMask(lines: string[]): boolean[] {
+  const mask: boolean[] = [];
+  let inComment = false;
+  for (const line of lines) {
+    if (inComment) {
+      mask.push(true);
+      if (line.includes('-->')) inComment = false;
+      continue;
+    }
+    const open = line.indexOf('<!--');
+    if (open < 0) {
+      mask.push(false);
+      continue;
+    }
+    // Opened here. Closed on the same line means only this line is masked.
+    mask.push(true);
+    if (line.indexOf('-->', open + 4) < 0) inComment = true;
+  }
+  return mask;
+}
+
+/** Fenced code and HTML comments together — the two places a line that looks
+ *  like a task is not one. */
+function skipMask(lines: string[]): boolean[] {
+  const fence = fenceMask(lines);
+  const comment = commentMask(lines);
+  return fence.map((f, i) => f || comment[i]);
+}
+
 function fenceMask(lines: string[]): boolean[] {
   const mask: boolean[] = [];
   let inFence = false;
@@ -80,7 +123,7 @@ const HEADING_RE = /^\s{0,3}#{2,6}\s+(.+?)\s*$/;
  */
 export function parseSections(content: string): Record<string, SectionRange> {
   const lines = splitLines(content);
-  const fenced = fenceMask(lines);
+  const fenced = skipMask(lines);
   const headings: { key: string; line: number }[] = [];
 
   lines.forEach((line, i) => {
@@ -112,10 +155,15 @@ export function parseSections(content: string): Record<string, SectionRange> {
  */
 export function parseTasksIn(content: string, file: string, from: number, to: number): VaultTask[] {
   const lines = splitLines(content);
+  // Masked over the *whole* document rather than the slice, so a fence or a
+  // comment opened above `from` still counts as open inside it. Indices stay
+  // document-absolute, which is what `VaultTask.line` means.
+  const skip = skipMask(lines);
   const out: VaultTask[] = [];
   const start = Math.max(0, from);
   const end = Math.min(lines.length - 1, to);
   for (let i = start; i <= end; i++) {
+    if (skip[i]) continue;
     const m = CHECKBOX_LINE_RE.exec(lines[i]);
     if (!m) continue;
     out.push({ text: lines[i], done: m[1].toLowerCase() === 'x', file, line: i });
@@ -146,7 +194,7 @@ function stripWikilinks(line: string): string {
  */
 export function sweepTagged(content: string, file: string, tag: string): VaultTask[] {
   const lines = splitLines(content);
-  const fenced = fenceMask(lines);
+  const fenced = skipMask(lines);
   const tagRe = new RegExp(`#${escapeRegExp(tag)}(?![\\w/-])`, 'i');
 
   const out: VaultTask[] = [];
@@ -212,7 +260,7 @@ export function scheduledEvents(
   weekStart: Date,
 ): ScheduledEventsResult {
   const lines = splitLines(content);
-  const fenced = fenceMask(lines);
+  const fenced = skipMask(lines);
   const events: CalEvent[] = [];
   const eventLines: VaultTask[] = [];
   let unresolved = 0;

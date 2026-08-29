@@ -3,8 +3,8 @@ import type { PointerEvent as ReactPointerEvent } from 'react';
 import { bodyHeight, endHour, gridHours, minutesForY, startHour, yForMinutes } from '../lib/grid';
 import { DAY_NAMES, addDays, dayIndex, fmtHourLabel, fmtMinutes, sameDate } from '../lib/week';
 import type { CalEvent, SkeletonBlock } from '../lib/types';
-import type { Gap, Proposal } from '../lib/gaps';
-import { snapToGap } from '../lib/gaps';
+import type { Gap, Proposal, ProposalConflict } from '../lib/gaps';
+import { proposalConflict, snapToGap } from '../lib/gaps';
 import { SNAP_MINUTES, snapToGrid } from '../lib/duration';
 import { EventBlock, eventMinutes } from './EventBlock';
 import { NowLine } from './NowLine';
@@ -565,6 +565,30 @@ export function WeekGrid({
     return orig;
   }
 
+  /**
+   * What a ghost or real block currently sitting at `day`/`startMin`/`endMin`
+   * would land on top of — recurring structure from `settings.blocks`, or
+   * another entry in `scheduled` — via `proposalConflict` (`lib/gaps.ts`).
+   * Recomputed on every render from the live position, so it covers a
+   * mid-drag preview and a settled position with the same call: there is no
+   * separate "was this hand-placed" flag to track, only "is the current spot
+   * clear". `excludeUid` is how a real block is kept from ever conflicting
+   * with its own unmoved footprint in `scheduled` — a ghost never needs it,
+   * since a proposal is never itself a member of `scheduled`. Drag/resize
+   * previews already feed this the *proposed* position (see `positionOf` /
+   * `eventPositionOf`), which is what makes the marker show up mid-gesture
+   * rather than only after release.
+   */
+  function conflictFor(
+    day: number,
+    startMin: number,
+    endMin: number,
+    excludeUid?: string,
+  ): ProposalConflict | null {
+    const events = excludeUid ? scheduled.filter((e) => e.uid !== excludeUid) : scheduled;
+    return proposalConflict(weekStart, day, startMin, endMin, blocks, events);
+  }
+
   // --- real-block resize: edge-drag re-times start or end ------------------
   //
   // See the matching comment on the ghost-resize handlers above — same
@@ -777,6 +801,9 @@ export function WeekGrid({
 
               {dayEvents.map((e, i) => {
                 const pos = eventPositionOf(e);
+                // Excludes `e` itself from what it's checked against — a
+                // block never conflicts with where it currently is.
+                const conflict = conflictFor(di, pos.startMin, pos.endMin, e.uid);
                 return (
                   <EventBlock
                     key={`${e.uid}-${i}`}
@@ -785,6 +812,7 @@ export function WeekGrid({
                     endMin={pos.endMin}
                     dragging={eventPreview?.uid === e.uid}
                     resizing={eventResizePreview?.uid === e.uid}
+                    conflict={conflict}
                     onUnschedule={onUnschedule}
                     onDragStart={handleEventDragStart}
                     onResizeStart={handleEventResizeStart}
@@ -794,10 +822,15 @@ export function WeekGrid({
 
               {dayProposals.map((p) => {
                 const pos = positionOf(p);
+                const conflict = conflictFor(di, pos.startMin, pos.endMin);
+                // `GhostBlock` already reads `proposal.conflict` (see its own
+                // doc comment) — this is what actually populates it, freshly
+                // on every render, rather than mutating the caller's `p`.
+                const effectiveProposal: Proposal = { ...p, conflict: conflict ?? undefined };
                 return (
                   <GhostBlock
                     key={p.key}
-                    proposal={p}
+                    proposal={effectiveProposal}
                     startMin={pos.startMin}
                     endMin={pos.endMin}
                     dragging={preview?.key === p.key}

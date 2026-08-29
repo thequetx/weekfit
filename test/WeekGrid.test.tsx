@@ -1,6 +1,6 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render } from '@testing-library/react';
+import { act, cleanup, fireEvent, render } from '@testing-library/react';
 import { WeekGrid } from '../src/components/WeekGrid';
 import type { WeekGridProps } from '../src/components/WeekGrid';
 import { addDays } from '../src/lib/week';
@@ -43,6 +43,17 @@ function proposal(overrides: Partial<Proposal> = {}): Proposal {
     startMin: 570, // 09:30
     endMin: 660, // 11:00
     window: 'work',
+    ...overrides,
+  };
+}
+
+function skeletonBlock(overrides: Partial<SkeletonBlock> = {}): SkeletonBlock {
+  return {
+    name: 'Gym',
+    kind: 'gym',
+    days: [2],
+    startMin: 600,
+    endMin: 660,
     ...overrides,
   };
 }
@@ -119,7 +130,15 @@ function pointer(clientX: number, clientY: number, extra: Partial<PointerEvent> 
 /** Dispatched on `window`, never the block — see the "tracks via window"
  *  suite below for why that distinction is the whole point of this file. */
 function windowPointer(type: 'pointermove' | 'pointerup' | 'pointercancel', clientX: number, clientY: number) {
-  window.dispatchEvent(new PointerEvent(type, { clientX, clientY, pointerId: 1, bubbles: true }));
+  // Wrapped in `act` so the resulting state update (`setPreview` etc.) is
+  // flushed synchronously — a raw `window.dispatchEvent` bypasses Testing
+  // Library's own `act`-wrapping (that only covers `fireEvent`), and the
+  // conflict-marking suite below reads the DOM *between* a move and the
+  // following pointerup, so the update has to have landed by the time the
+  // assertion runs, not on some later microtask.
+  act(() => {
+    window.dispatchEvent(new PointerEvent(type, { clientX, clientY, pointerId: 1, bubbles: true }));
+  });
 }
 
 describe('WeekGrid — grab offset is preserved (the reported bug)', () => {
@@ -694,5 +713,220 @@ describe('WeekGrid — edge-drag resize', () => {
 
     expect(container.querySelector('.weekfit-ev .weekfit-resize--bottom')).not.toBeNull();
     expect(container.querySelector('.weekfit-ev .weekfit-resize--top')).toBeNull();
+  });
+});
+
+describe('WeekGrid — conflict marking', () => {
+  // Same geometry as the suites above.
+  const yFor = (min: number) => ((min - 300) / 60) * 46;
+
+  function resizeHandleFor(container: HTMLElement, blockSelector: string, edge: 'top' | 'bottom') {
+    return container.querySelector(`${blockSelector} .weekfit-resize--${edge}`) as HTMLElement;
+  }
+
+  it('a block dragged onto a recurring block from settings.blocks gets the conflict marker, naming it', () => {
+    const onMoveBlock = vi.fn();
+    const gym = skeletonBlock({ name: 'Gym', days: [2], startMin: 600, endMin: 660 });
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:40',
+      start: dateAt(WEDNESDAY, 9, 0), // startMin 540
+      end: dateAt(WEDNESDAY, 10, 0), // endMin 600, duration 60
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], blocks: [gym], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    // Grab the block at its own top edge (offset 0) and drag it down 60
+    // minutes, landing it squarely on Gym's 10:00-11:00 slot.
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(600));
+
+    // Live preview, before pointerup — this is the "before you release"
+    // half of the feature, not only "after it lands".
+    expect(block.className).toContain('weekfit-ev--conflict');
+    expect(block.getAttribute('aria-label')).toMatch(/gym/i);
+
+    windowPointer('pointerup', 250, BODY_TOP + yFor(600));
+
+    // Marking, never refusing: the drop still lands and the callback fires.
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:40', 2, 600);
+  });
+
+  it('a block dragged onto another scheduled block gets the conflict marker, naming that block', () => {
+    const onMoveBlock = vi.fn();
+    const other = calEvent({
+      uid: 'Weekly/2026-W36.md:41',
+      title: 'Team Sync',
+      start: dateAt(WEDNESDAY, 10, 0), // 600
+      end: dateAt(WEDNESDAY, 11, 0), // 660
+    });
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:42',
+      start: dateAt(WEDNESDAY, 9, 0), // 540
+      end: dateAt(WEDNESDAY, 10, 0), // 600
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev, other], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    // `ev` renders first — `scheduled`'s own order, preserved by the filter
+    // in WeekGrid — so it's the first `.weekfit-ev` in the DOM.
+    const block = container.querySelectorAll('.weekfit-ev')[0] as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(600));
+
+    expect(block.className).toContain('weekfit-ev--conflict');
+    expect(block.getAttribute('aria-label')).toMatch(/team sync/i);
+
+    windowPointer('pointerup', 250, BODY_TOP + yFor(600));
+
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:42', 2, 600);
+  });
+
+  it('a block dragged to a free slot does not get the conflict marker', () => {
+    const onMoveBlock = vi.fn();
+    const gym = skeletonBlock({ days: [2], startMin: 900, endMin: 960 }); // 15:00-16:00, well clear
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:43',
+      start: dateAt(WEDNESDAY, 9, 0), // 540
+      end: dateAt(WEDNESDAY, 10, 0), // 600
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], blocks: [gym], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(630)); // -> 10:30-11:30, still clear
+
+    expect(block.className).not.toContain('weekfit-ev--conflict');
+    expect(container.querySelector('.weekfit-ev__conflict')).toBeNull();
+
+    windowPointer('pointerup', 250, BODY_TOP + yFor(630));
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:43', 2, 630);
+  });
+
+  it('a block never conflicts with itself, even overlapping its own original position mid-drag', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:44',
+      start: dateAt(WEDNESDAY, 9, 0), // 540
+      end: dateAt(WEDNESDAY, 10, 0), // 600
+    });
+    // `ev` is the *only* thing on the board — the sole possible source of a
+    // false-positive conflict is its own (unmoved) entry in `scheduled`.
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], blocks: [], gaps: null, onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    // Nudge it 30 minutes — the live preview (9:30-10:30) still overlaps the
+    // block's own original position (9:00-10:00) sitting untouched in
+    // `scheduled`. A broken self-exclusion would flag this.
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(570));
+
+    expect(block.className).not.toContain('weekfit-ev--conflict');
+
+    windowPointer('pointerup', 250, BODY_TOP + yFor(570));
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:44', 2, 570);
+  });
+
+  it('a resize that grows a block into a recurring commitment flags it, and the release still fires onResizeBlock', () => {
+    const onResizeBlock = vi.fn();
+    const gym = skeletonBlock({ name: 'Gym', days: [2], startMin: 630, endMin: 690 }); // 10:30-11:30
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:45',
+      start: dateAt(WEDNESDAY, 9, 0), // 540
+      end: dateAt(WEDNESDAY, 10, 0), // 600
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], blocks: [gym], gaps: null, onResizeBlock })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandleFor(container, '.weekfit-ev', 'bottom');
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    // Drag the bottom edge from 600 to 660 — grows the block into Gym's
+    // 10:30-11:30 slot (630-660 overlap).
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(600)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(660));
+
+    expect(block.className).toContain('weekfit-ev--conflict');
+    expect(block.getAttribute('aria-label')).toMatch(/gym/i);
+
+    windowPointer('pointerup', 250, BODY_TOP + yFor(660));
+
+    expect(onResizeBlock).toHaveBeenCalledTimes(1);
+    expect(onResizeBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:45', 540, 660);
+  });
+
+  it('a ghost resized into a scheduled block gets the conflict marker, and the release still fires onResizeProposal', () => {
+    const onResizeProposal = vi.fn();
+    const other = calEvent({
+      uid: 'Weekly/2026-W36.md:46',
+      title: 'Standup',
+      start: dateAt(WEDNESDAY, 11, 0), // 660
+      end: dateAt(WEDNESDAY, 11, 30), // 690
+    });
+    const p = proposal({ day: 2, startMin: 570, endMin: 660, minutes: 90 });
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [other], proposals: [p], onResizeProposal })} />,
+    );
+    installGeometry(container);
+    const handle = resizeHandleFor(container, '.weekfit-ghost', 'bottom');
+    const ghost = container.querySelector('.weekfit-ghost') as HTMLElement;
+
+    fireEvent.pointerDown(handle, pointer(250, BODY_TOP + yFor(660)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(690));
+
+    // GhostBlock names the conflict in its `title` (tooltip), not its
+    // `aria-label` — see `GhostBlock`'s own `conflictLabel`/`title` split.
+    expect(ghost.className).toContain('weekfit-ghost--conflict');
+    expect(ghost.getAttribute('title')).toMatch(/standup/i);
+
+    windowPointer('pointerup', 250, BODY_TOP + yFor(690));
+
+    expect(onResizeProposal).toHaveBeenCalledTimes(1);
+    expect(onResizeProposal).toHaveBeenCalledWith('Weekly/2026-W36.md:5', 570, 690);
+  });
+
+  it('a conflicting ghost and a conflicting real block stay visually distinguishable', () => {
+    const gym = skeletonBlock({ name: 'Gym', days: [2], startMin: 600, endMin: 660 });
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:47',
+      start: dateAt(WEDNESDAY, 10, 0), // 600 — already sitting on Gym
+      end: dateAt(WEDNESDAY, 11, 0), // 660
+    });
+    const p = proposal({ day: 2, startMin: 600, endMin: 690, minutes: 90 }); // also overlaps Gym
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], blocks: [gym], proposals: [p], gaps: null })} />,
+    );
+    installGeometry(container);
+
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+    const ghost = container.querySelector('.weekfit-ghost') as HTMLElement;
+
+    // Both flagged...
+    expect(block.className).toContain('weekfit-ev--conflict');
+    expect(ghost.className).toContain('weekfit-ghost--conflict');
+
+    // ...but never with each other's marker — a ghost in conflict must never
+    // read as a committed block in conflict, or vice versa.
+    expect(block.className).not.toContain('weekfit-ghost--conflict');
+    expect(ghost.className).not.toContain('weekfit-ev--conflict');
+    // The pre-existing real-vs-ghost distinction (solid vs. dashed, `weekfit-ev`
+    // vs. `weekfit-ghost`) still holds independent of the conflict marker.
+    expect(block.className).toContain('weekfit-ev');
+    expect(ghost.className).toContain('weekfit-ghost');
   });
 });

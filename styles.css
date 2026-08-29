@@ -342,6 +342,30 @@
   box-shadow: 0 2px 6px var(--background-modifier-box-shadow);
 }
 
+/* A real block sitting on top of a recurring commitment or another scheduled
+   block — crimson (`--color-red`), not the ghost's amber, since a committed
+   block colliding is the more serious of the two (the desktop app's own
+   convention for "the more urgent half of a pair", same as the now-line vs.
+   the overdue marker). `outline` rather than `border`/`box-shadow` so it
+   never competes with `.weekfit-ev`'s own accent `border-left` or
+   `.weekfit-ev--dragging`'s drop shadow when both apply at once. */
+.weekfit-ev--conflict {
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--color-red) 10%, var(--background-secondary));
+  outline: 1px solid var(--color-red); /* fallback: no color-mix */
+  outline: 1px solid color-mix(in srgb, var(--color-red) 45%, transparent);
+  outline-offset: -1px;
+}
+
+.weekfit-ev__conflict {
+  position: absolute;
+  top: 2px;
+  left: 5px;
+  font-size: 0.7em;
+  color: var(--color-red);
+  pointer-events: none;
+}
+
 .weekfit-ev__unschedule {
   position: absolute;
   bottom: 2px;

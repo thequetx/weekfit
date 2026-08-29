@@ -45,10 +45,18 @@ vi.mock('obsidian', async () => {
 
 const { VaultRepo } = await import('../src/data/vaultRepo');
 const { computeFit } = await import('../src/data/planner');
-const { acceptProposals, editPlacements } = await import('../src/data/writer');
+const {
+  acceptProposals,
+  editPlacements,
+  appendUnderHeading,
+  removeLines,
+  setFrontmatter,
+  replaceChildSessions,
+} = await import('../src/data/writer');
 const { hasPlacement } = await import('../src/data/dayplanner');
 const { TFile } = (await import('obsidian')) as unknown as { TFile: new (path: string) => any };
 const { DEFAULT_SETTINGS } = await import('../src/data/contract');
+const { parse: parseYaml, stringify: stringifyYaml } = await import('yaml');
 import type { WeekfitSettings } from '../src/data/contract';
 import { addDays, startOfISOWeek } from '../src/lib/week';
 import { dayPlannerRange } from '../src/lib/source';
@@ -115,6 +123,42 @@ class RealFsVault {
     await fsp.writeFile(abs, result, 'utf8');
     return result;
   }
+
+  /** The one creation `appendUnderHeading` is allowed to do — a brand new
+   *  file on the real filesystem, parent directory included. */
+  async create(p: string, content: string): Promise<any> {
+    const abs = this.abs(p);
+    await fsp.mkdir(path.dirname(abs), { recursive: true });
+    await fsp.writeFile(abs, content, 'utf8');
+    return new TFile(p.replace(/\\/g, '/'));
+  }
+}
+
+/** Just enough of `FileManager` for `setFrontmatter`: a real
+ *  read-parse-mutate-serialize-write round trip against the real filesystem,
+ *  using the `yaml` package the same way `src/lib/skeleton.ts` already does
+ *  elsewhere in this codebase — the closest a test can get to Obsidian's own
+ *  atomic frontmatter contract without launching Obsidian itself. */
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+
+class RealFsFileManager {
+  constructor(private vault: RealFsVault) {}
+
+  async processFrontMatter(file: { path: string }, fn: (fm: any) => void): Promise<void> {
+    const abs = this.vault.abs(file.path);
+    const data = await fsp.readFile(abs, 'utf8');
+    const eol = data.includes('\r\n') ? '\r\n' : '\n';
+
+    const m = FRONTMATTER_RE.exec(data);
+    const fm: Record<string, unknown> = m ? parseYaml(m[1]) ?? {} : {};
+    const rest = m ? data.slice(m[0].length) : data;
+
+    fn(fm);
+
+    const yamlBody = stringifyYaml(fm).replace(/\n$/, '').split('\n').join(eol);
+    const block = `---${eol}${yamlBody}${eol}---${eol}`;
+    await fsp.writeFile(abs, block + rest, 'utf8');
+  }
 }
 
 /** Just enough of `MetadataCache` for the `#thisweek` pre-filter: scan the
@@ -157,7 +201,8 @@ async function setupVault(): Promise<Ctx> {
 
   const vault = new RealFsVault(tempDir);
   const metadataCache = new RealFsMetadataCache(vault);
-  const app = { vault, metadataCache } as any;
+  const fileManager = new RealFsFileManager(vault);
+  const app = { vault, metadataCache, fileManager } as any;
   const repo = new VaultRepo(app, () => settings());
   return { tempDir, app, vault, repo };
 }
@@ -790,6 +835,222 @@ describe('smoke: real filesystem read -> fit -> write pipeline', () => {
       expect(fit2.proposals.some((p) => p.file === filePath && p.line === proposal.line)).toBe(
         true,
       );
+    });
+  });
+
+  // -------------------------------------------------------------------
+  // appendUnderHeading, removeLines, setFrontmatter, replaceChildSessions
+  // on the real filesystem
+  // -------------------------------------------------------------------
+
+  describe('appendUnderHeading on a real file', () => {
+    const filePath = 'Weekly/2026-W36.md';
+
+    it('appends at the end of the ## Tasks section, leaving everything above and the ## Review heading untouched', async () => {
+      const abs = path.join(ctx.tempDir, filePath);
+      const before = fs.readFileSync(abs, 'utf8');
+      const beforeLines = before.split('\n');
+
+      const result = await appendUnderHeading(ctx.app, [
+        { file: filePath, heading: 'Tasks', lines: ['- [ ] Newly captured task'] },
+      ]);
+      expect(result.errors).toEqual([]);
+      expect(result.written).toBe(1);
+
+      const after = fs.readFileSync(abs, 'utf8');
+      const afterLines = after.split('\n');
+      expect(afterLines).toHaveLength(beforeLines.length + 1);
+
+      const newLineIndex = lineIndexOf(after, '- [ ] Newly captured task');
+      expect(newLineIndex).toBeGreaterThan(0);
+      // Right after the last real task line ("Water plants"), before the
+      // blank + "## Review" boundary — not at the top of the section.
+      expect(afterLines[newLineIndex - 1]).toBe('- [ ] Water plants 🔁 every week');
+      expect(afterLines[newLineIndex + 1]).toBe('');
+      expect(afterLines[newLineIndex + 2]).toBe('## Review');
+
+      // Everything before the insertion point is untouched.
+      for (let i = 0; i < newLineIndex; i++) {
+        expect(afterLines[i]).toBe(beforeLines[i]);
+      }
+      // Everything from "## Review" on is untouched, just shifted down by one.
+      for (let i = newLineIndex + 2; i < afterLines.length; i++) {
+        expect(afterLines[i]).toBe(beforeLines[i - 1]);
+      }
+    });
+
+    it('creates the file on disk when it does not exist yet', async () => {
+      const newPath = 'Weekly/2026-W99.md';
+      const abs = path.join(ctx.tempDir, newPath);
+      expect(fs.existsSync(abs)).toBe(false);
+
+      const result = await appendUnderHeading(ctx.app, [
+        { file: newPath, heading: 'Tasks', lines: ['- [ ] First capture'] },
+      ]);
+      expect(result.errors).toEqual([]);
+      expect(result.written).toBe(1);
+
+      expect(fs.existsSync(abs)).toBe(true);
+      expect(fs.readFileSync(abs, 'utf8')).toBe('## Tasks\n\n- [ ] First capture\n');
+    });
+  });
+
+  describe('removeLines on a real file, then re-read', () => {
+    const filePath = 'Weekly/2026-W36.md';
+
+    it('removes the targeted lines from disk, and the re-read snapshot no longer carries them', async () => {
+      const abs = path.join(ctx.tempDir, filePath);
+      const before = fs.readFileSync(abs, 'utf8');
+
+      const bookDentistLine = lineIndexOf(before, '- [ ] Book dentist');
+      const planStreamLine = lineIndexOf(before, '- [ ] Plan next stream #content');
+      expect(bookDentistLine).toBeGreaterThanOrEqual(0);
+      expect(planStreamLine).toBeGreaterThanOrEqual(0);
+
+      const result = await removeLines(ctx.app, [
+        { file: filePath, line: bookDentistLine, expectedText: '- [ ] Book dentist', title: 'Book dentist' },
+        {
+          file: filePath,
+          line: planStreamLine,
+          expectedText: '- [ ] Plan next stream #content',
+          title: 'Plan next stream',
+        },
+      ]);
+      expect(result.errors).toEqual([]);
+      expect(result.skipped).toEqual([]);
+      expect(result.written).toBe(2);
+
+      const after = fs.readFileSync(abs, 'utf8');
+      expect(after).not.toContain('Book dentist');
+      expect(after).not.toContain('Plan next stream');
+      // Every other original line still there, in its original relative order.
+      expect(after).toContain('- [ ] Prep talk slides ~90m');
+      expect(after).toContain('- [ ] Water plants 🔁 every week');
+      expect(after).toContain('## Review');
+
+      const snap = await ctx.repo.readWeek(WEEK_START);
+      expect(snap.errors).toEqual([]);
+      expect(snap.tasks.some((t) => t.text === '- [ ] Book dentist')).toBe(false);
+      expect(snap.tasks.some((t) => t.text === '- [ ] Plan next stream #content')).toBe(false);
+      // A survivor further down the original file is still read correctly at
+      // its new (shifted) line number.
+      const water = snap.tasks.find((t) => t.text === '- [ ] Water plants 🔁 every week');
+      expect(water).toBeTruthy();
+      expect(lineIndexOf(after, water!.text)).toBe(water!.line);
+    });
+  });
+
+  describe('setFrontmatter on a real file', () => {
+    const filePath = 'Weekly/2026-W36.md';
+
+    it('merges into the real weekly note frontmatter and leaves the body byte-identical', async () => {
+      const abs = path.join(ctx.tempDir, filePath);
+      const before = fs.readFileSync(abs, 'utf8');
+      const bodyStart = before.indexOf('## Intentions');
+      const bodyBefore = before.slice(bodyStart);
+
+      const result = await setFrontmatter(ctx.app, filePath, {
+        status: 'active',
+        tasks_total: 9,
+      });
+      expect(result.errors).toEqual([]);
+      expect(result.written).toBe(1);
+
+      const after = fs.readFileSync(abs, 'utf8');
+      expect(after.slice(after.indexOf('## Intentions'))).toBe(bodyBefore);
+
+      const fmMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(after)!;
+      const fm = parseYaml(fmMatch[1]);
+      expect(fm).toEqual({
+        week: '2026-W36',
+        range: '2026-08-31/2026-09-06',
+        status: 'active', // overwritten
+        tasks_total: 9, // added
+      });
+    });
+  });
+
+  describe('replaceChildSessions on a real file: split -> re-split -> clear', () => {
+    const filePath = 'Weekly/2026-W36.md';
+    const parentText = '- [ ] Prep talk slides ~90m';
+
+    it('rewrites the raw bytes correctly at every step, and the file is byte-identical to the original once cleared', async () => {
+      const abs = path.join(ctx.tempDir, filePath);
+      const original = fs.readFileSync(abs, 'utf8');
+      const parentLine = lineIndexOf(original, parentText);
+      expect(parentLine).toBeGreaterThanOrEqual(0);
+
+      // --- split into two sittings -----------------------------------------
+      const session1 = '    - [ ] 09:00 - 10:00 Prep talk slides ⏳ 2026-09-01';
+      const session2 = '    - [ ] 14:00 - 14:30 Prep talk slides ⏳ 2026-09-02';
+
+      const splitResult = await replaceChildSessions(ctx.app, [
+        {
+          file: filePath,
+          line: parentLine,
+          expectedText: parentText,
+          title: 'Prep talk slides',
+          sessions: [session1, session2],
+        },
+      ]);
+      expect(splitResult.errors).toEqual([]);
+      expect(splitResult.skipped).toEqual([]);
+      expect(splitResult.written).toBe(1);
+
+      const afterSplit = fs.readFileSync(abs, 'utf8');
+      const splitLines = afterSplit.split('\n');
+      expect(splitLines[parentLine]).toBe(parentText);
+      expect(splitLines[parentLine + 1]).toBe(session1);
+      expect(splitLines[parentLine + 2]).toBe(session2);
+      // Everything below the two new lines is the original file, just shifted
+      // down by two; everything above is untouched.
+      const originalLines = original.split('\n');
+      for (let i = 0; i < parentLine; i++) expect(splitLines[i]).toBe(originalLines[i]);
+      for (let i = parentLine + 1; i < originalLines.length; i++) {
+        expect(splitLines[i + 2]).toBe(originalLines[i]);
+      }
+
+      // --- re-split with different times: replaces, doesn't append ---------
+      const newSession = '    - [ ] 10:00 - 11:00 Prep talk slides ⏳ 2026-09-03';
+      const resplitResult = await replaceChildSessions(ctx.app, [
+        {
+          file: filePath,
+          line: parentLine,
+          expectedText: parentText,
+          title: 'Prep talk slides',
+          sessions: [newSession],
+        },
+      ]);
+      expect(resplitResult.written).toBe(1);
+      expect(resplitResult.skipped).toEqual([]);
+
+      const afterResplit = fs.readFileSync(abs, 'utf8');
+      const resplitLines = afterResplit.split('\n');
+      expect(resplitLines[parentLine]).toBe(parentText);
+      expect(resplitLines[parentLine + 1]).toBe(newSession);
+      expect(resplitLines[parentLine + 2]).not.toBe(session1);
+      expect(afterResplit).not.toContain(session1);
+      expect(afterResplit).not.toContain(session2);
+      for (let i = 0; i < parentLine; i++) expect(resplitLines[i]).toBe(originalLines[i]);
+      for (let i = parentLine + 1; i < originalLines.length; i++) {
+        expect(resplitLines[i + 1]).toBe(originalLines[i]);
+      }
+
+      // --- clear: back to exactly the original file, byte for byte ---------
+      const clearResult = await replaceChildSessions(ctx.app, [
+        {
+          file: filePath,
+          line: parentLine,
+          expectedText: parentText,
+          title: 'Prep talk slides',
+          sessions: [],
+        },
+      ]);
+      expect(clearResult.written).toBe(1);
+      expect(clearResult.skipped).toEqual([]);
+
+      const afterClear = fs.readFileSync(abs, 'utf8');
+      expect(afterClear).toBe(original);
     });
   });
 });

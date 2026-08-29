@@ -342,3 +342,54 @@ describe('scheduledEvents', () => {
     });
   });
 });
+
+describe('HTML comments are not content', () => {
+  // Commenting a task out is how people defer one without deleting it, and it
+  // renders as nothing — so it must parse as nothing. Found by the weekly-note
+  // template's own test: the template puts its worked examples in a comment,
+  // and without this a brand-new vault's first "Fit this week" would try to
+  // schedule the instructions.
+  const note = [
+    '## Tasks',
+    '',
+    '- [ ] Real task',
+    '<!--',
+    '- [ ] Commented out for now',
+    '- [ ] 09:00 - 10:00 Also commented ⏳ 2026-09-01',
+    '-->',
+    '- [ ] Another real task',
+    '- [ ] Parked <!-- one-liner --> but still real',
+    '',
+  ].join('\n');
+
+  it('does not parse a task inside a comment block', () => {
+    const sec = parseSections(note);
+    const tasks = parseTasksIn(note, 'n.md', sec['tasks'].start, sec['tasks'].end);
+    expect(tasks.map((t) => t.text)).toEqual(['- [ ] Real task', '- [ ] Another real task']);
+  });
+
+  it('a single-line comment masks only its own line', () => {
+    const lines = ['- [ ] a', '<!-- - [ ] b -->', '- [ ] c'].join('\n');
+    const tasks = parseTasksIn(lines, 'n.md', 0, 2);
+    expect(tasks.map((t) => t.text)).toEqual(['- [ ] a', '- [ ] c']);
+  });
+
+  it('does not sweep a #thisweek inside a comment', () => {
+    const lines = ['<!--', '- [ ] hidden #thisweek', '-->', '- [ ] shown #thisweek'].join('\n');
+    expect(sweepTagged(lines, 'n.md', 'thisweek').map((t) => t.text)).toEqual([
+      '- [ ] shown #thisweek',
+    ]);
+  });
+
+  it('does not turn a commented Day Planner line into an event', () => {
+    const lines = ['<!--', '- [ ] 09:00 - 10:00 Ghost ⏳ 2026-09-01', '-->'].join('\n');
+    const weekStart = startOfISOWeek(new Date(2026, 7, 31));
+    expect(scheduledEvents(lines, 'n.md', null, weekStart).events).toEqual([]);
+  });
+
+  it('an unterminated comment masks to end of file', () => {
+    const lines = ['- [ ] before', '<!--', '- [ ] after'].join('\n');
+    const tasks = parseTasksIn(lines, 'n.md', 0, 2);
+    expect(tasks.map((t) => t.text)).toEqual(['- [ ] before']);
+  });
+});

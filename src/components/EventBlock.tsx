@@ -2,6 +2,7 @@ import type { PointerEvent } from 'react';
 import { yForMinutes } from '../lib/grid';
 import { fmtClock, fmtMinutes, minutesOfDay, sameDate } from '../lib/week';
 import type { CalEvent } from '../lib/types';
+import type { ProposalConflict } from '../lib/gaps';
 
 export interface EventBlockProps {
   ev: CalEvent;
@@ -19,6 +20,16 @@ export interface EventBlockProps {
    *  `dragging` (a move) so the cursor/shadow can read `ns-resize` rather
    *  than `grabbing` while it's happening. */
   resizing: boolean;
+  /**
+   * What this block (at its *current*, possibly-mid-drag position) sits on
+   * top of, from `WeekGrid`'s `proposalConflict` check — `null` when the
+   * spot is clear. `CalEvent` itself carries no such field (it's a `lib/`
+   * type, ported byte-for-byte); this is WeekGrid's own live computation,
+   * handed down as a plain prop instead. Mirrors `Proposal.conflict`
+   * (`GhostBlock`) in meaning, kept as a separate prop here since a real
+   * block has no `conflict` field of its own to reuse.
+   */
+  conflict?: ProposalConflict | null;
   onUnschedule: (uid: string) => void;
   /** Starts the drag. `WeekGrid` takes it from here — once a drag is live it
    *  tracks pointermove/pointerup/pointercancel on `window`, not on this
@@ -94,6 +105,7 @@ export function EventBlock({
   endMin,
   dragging,
   resizing,
+  conflict,
   onUnschedule,
   onDragStart,
   onResizeStart,
@@ -105,13 +117,22 @@ export function EventBlock({
   const tight = height < 40;
   const veryShort = height < SHORT_BLOCK_PX;
 
-  const label = `${ev.title} · ${fmtMinutes(startMin)}–${fmtMinutes(endMin)}`;
+  // Same wording pattern as `GhostBlock`'s `conflictLabel` — naming *what* it
+  // collides with is the whole value here; "conflict" alone tells whoever's
+  // reading the tooltip/aria-label nothing they can act on.
+  const conflictLabel = conflict
+    ? `Overlaps ${conflict.kind === 'skeleton' ? 'the recurring block' : 'the event'} "${conflict.title}"`
+    : null;
+
+  const label = conflictLabel
+    ? `${ev.title} · ${fmtMinutes(startMin)}–${fmtMinutes(endMin)} · ${conflictLabel}`
+    : `${ev.title} · ${fmtMinutes(startMin)}–${fmtMinutes(endMin)}`;
 
   return (
     <div
-      className={`weekfit-ev${tight ? ' weekfit-ev--tight' : ''}${dragging ? ' weekfit-ev--dragging' : ''}${resizing ? ' weekfit-ev--resizing' : ''}`}
+      className={`weekfit-ev${tight ? ' weekfit-ev--tight' : ''}${dragging ? ' weekfit-ev--dragging' : ''}${resizing ? ' weekfit-ev--resizing' : ''}${conflict ? ' weekfit-ev--conflict' : ''}`}
       style={{ top, height }}
-      title={ev.description ? `${ev.title}\n\n${ev.description}` : ev.title}
+      title={conflictLabel ?? (ev.description ? `${ev.title}\n\n${ev.description}` : ev.title)}
       role="group"
       aria-label={label}
       onPointerDown={(e) => onDragStart(ev, e)}
@@ -142,6 +163,11 @@ export function EventBlock({
           title={`Session ${ev.session} of ${ev.sessions} for this task`}
         >
           {ev.session}/{ev.sessions}
+        </span>
+      )}
+      {conflict && (
+        <span className="weekfit-ev__conflict" aria-hidden="true">
+          ⚠
         </span>
       )}
       <button
