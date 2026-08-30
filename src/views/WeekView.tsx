@@ -39,6 +39,10 @@ export interface WeekViewState {
   onCreateWeekNote: () => void;
   onReplan: () => void;
   onReview: () => void;
+  onOpenTask: (file: string, line: number) => void;
+  onToggleDone: (file: string, line: number, text: string, done: boolean) => void;
+  onScheduleTask: (file: string, line: number, text: string, day: number, startMin: number) => void;
+  onTaskMenu: (file: string, line: number, text: string, x: number, y: number) => void;
   // --- Phase 2C: manipulating a block already on the grid ------------------
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
@@ -76,6 +80,10 @@ const INITIAL_STATE: WeekViewState = {
   onCreateWeekNote: noop,
   onReplan: noop,
   onReview: noop,
+  onOpenTask: noop,
+  onToggleDone: noop,
+  onScheduleTask: noop,
+  onTaskMenu: noop,
   onMoveBlock: noop,
   onUnschedule: noop,
   onOpenSource: noop,

@@ -1,4 +1,4 @@
-import { Notice, Plugin, TFile } from 'obsidian';
+import { Menu, Notice, Plugin, TFile } from 'obsidian';
 import { VIEW_TYPE_WEEK, WeekView } from './views/WeekView';
 import { VIEW_TYPE_BACKLOG, BacklogView } from './views/BacklogView';
 import { CaptureModal } from './views/CaptureModal';
@@ -15,6 +15,7 @@ import {
   createNote,
   editPlacements,
   isoDateFor,
+  setTaskDone,
 } from './data/writer';
 import { SettingsTab } from './settings/SettingsTab';
 import { DEFAULT_SETTINGS } from './data/contract';
@@ -27,6 +28,8 @@ import type {
 } from './data/contract';
 import type { Proposal } from './lib/gaps';
 import { dayPlannerRange } from './lib/source';
+import { taskTitle } from './lib/taskmeta';
+import { resolveTaskDuration, snapToGrid } from './lib/duration';
 import { addDays, addWeeks, startOfISOWeek } from './lib/week';
 
 /** How often the now-line moves. A minute is the resolution it's drawn at, so
@@ -387,6 +390,76 @@ export default class WeekfitPlugin extends Plugin {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // acting on an unscheduled task without leaving the pane
+  // -------------------------------------------------------------------------
+
+  private async toggleDone(
+    file: string,
+    line: number,
+    text: string,
+    done: boolean,
+  ): Promise<void> {
+    await this.applyWrite(
+      setTaskDone(this.app, [{ file, line, expectedText: text, title: taskTitle(text), done }]),
+    );
+  }
+
+  /**
+   * Place a rail task by hand. The same verified write accepting a proposal
+   * uses — a hand-drop is a different way of choosing a slot, not a different
+   * way of writing one.
+   */
+  private async scheduleTask(
+    file: string,
+    line: number,
+    text: string,
+    day: number,
+    startMin: number,
+  ): Promise<void> {
+    const snap = this.snapshot;
+    if (!snap) return;
+
+    const minutes = snapToGrid(resolveTaskDuration(text, this.settings.durations).minutes);
+    const locations = resolveNoteLocations(this.app, this.settings);
+    const isDaily =
+      file === notePathFor(addDays(snap.weekStart, day), locations.daily.folder, locations.daily.format);
+
+    await this.applyEdits([
+      {
+        file,
+        line,
+        expectedText: text,
+        range: dayPlannerRange(startMin, startMin + minutes),
+        scheduledDate: isDaily ? null : isoDateFor(snap.weekStart, day),
+        title: taskTitle(text),
+      },
+    ]);
+  }
+
+  private taskMenu(file: string, line: number, text: string, x: number, y: number): void {
+    const menu = new Menu();
+    menu.addItem((i) =>
+      i
+        .setTitle('Open in note')
+        .setIcon('file-text')
+        .onClick(() => void this.openLine(file, line)),
+    );
+    menu.addItem((i) =>
+      i
+        .setTitle('Mark done')
+        .setIcon('check')
+        .onClick(() => void this.toggleDone(file, line, text, true)),
+    );
+    menu.addItem((i) =>
+      i
+        .setTitle('Fit this week')
+        .setIcon('calendar-range')
+        .onClick(() => void this.runFit()),
+    );
+    menu.showAtPosition({ x, y });
+  }
+
   private async openReview(): Promise<void> {
     if (!this.snapshot) await this.refresh();
     const snapshot = this.snapshot;
@@ -488,15 +561,21 @@ export default class WeekfitPlugin extends Plugin {
     return { file: task.file, line: task.line, text: task.text, title: snap.scheduled[i].title };
   }
 
-  private async applyEdits(edits: PlacementEdit[]): Promise<void> {
-    if (!edits.length) return;
-    this.lastWrite = await editPlacements(this.app, edits);
+  /** Run a write, record what happened, tell the user if a whole file failed,
+   *  and re-read. Every write in this plugin ends the same way. */
+  private async applyWrite(work: Promise<WriteResult>): Promise<void> {
+    this.lastWrite = await work;
     if (this.lastWrite.errors.length) {
       new Notice(
         `Weekfit: ${this.lastWrite.errors.length} file(s) could not be written — see the view.`,
       );
     }
     await this.refresh();
+  }
+
+  private async applyEdits(edits: PlacementEdit[]): Promise<void> {
+    if (!edits.length) return;
+    await this.applyWrite(editPlacements(this.app, edits));
   }
 
   private async moveBlock(uid: string, day: number, startMin: number): Promise<void> {
@@ -632,6 +711,18 @@ export default class WeekfitPlugin extends Plugin {
           onCreateWeekNote: () => void this.createWeekNote(),
           onReplan: () => void this.runReplan(),
           onReview: () => void this.openReview(),
+          onOpenTask: (file: string, line: number) => void this.openLine(file, line),
+          onToggleDone: (file: string, line: number, text: string, done: boolean) =>
+            void this.toggleDone(file, line, text, done),
+          onScheduleTask: (
+            file: string,
+            line: number,
+            text: string,
+            day: number,
+            startMin: number,
+          ) => void this.scheduleTask(file, line, text, day, startMin),
+          onTaskMenu: (file: string, line: number, text: string, x: number, y: number) =>
+            this.taskMenu(file, line, text, x, y),
           onPrevWeek: () => void this.goToWeek(addWeeks(this.weekStart, -1)),
           onNextWeek: () => void this.goToWeek(addWeeks(this.weekStart, 1)),
           onToday: () => void this.goToWeek(new Date()),

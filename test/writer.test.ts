@@ -21,6 +21,7 @@ const {
   setFrontmatter,
   replaceChildSessions,
   createNote,
+  setTaskDone,
 } = await import('../src/data/writer');
 const { TFile } = (await import('obsidian')) as unknown as { TFile: new (path: string) => any };
 const { addDays, startOfISOWeek } = await import('../src/lib/week');

@@ -24,9 +24,9 @@ import type { App } from 'obsidian';
 import type { Proposal } from '../lib/gaps';
 import { dayPlannerRange, DAY_PLANNER_RE } from '../lib/source';
 import { addDays } from '../lib/week';
-import { parseTaskMeta, taskTitle } from '../lib/taskmeta';
+import { clearCompletion, parseTaskMeta, taskTitle, withCompletion } from '../lib/taskmeta';
 import type { MetaFlavour } from '../lib/taskmeta';
-import { applyPlacement, hasPlacement } from './dayplanner';
+import { applyPlacement, hasPlacement, splitTaskPrefix } from './dayplanner';
 import type { PlacementEdit, WriteResult, WriteSkip } from './contract';
 
 /** Local-time `YYYY-MM-DD` for day `day` (0 = Monday) of the week starting
@@ -63,28 +63,39 @@ function locationKey(e: { file: string; line: number }): string {
 }
 
 // ---------------------------------------------------------------------------
-// editPlacements — the one write path
+// rewriteVerifiedLines — the one write path
+//
+// Every public write below is this function plus a line transform. Adding a
+// second copy of it is the mistake this section exists to prevent.
 // ---------------------------------------------------------------------------
 
+/** The minimum a verified line edit needs: where it is, and what it was when
+ *  it was read. */
+interface VerifiedEdit {
+  file: string;
+  line: number;
+  expectedText: string;
+  title: string;
+}
+
 /**
- * Apply a batch of placement edits — set a range, change one, or clear one
- * (unschedule) — to the vault. Never throws — a failure writing one file must
- * not lose the others, so every failure mode is either a `WriteSkip`
- * (expected, named) or an entry in `WriteResult.errors` (unexpected, still
- * reported, still not fatal to the rest of the batch).
+ * The one verified read-modify-write in this plugin.
  *
- * Every safety property lives here and nowhere else:
- *  - `vault.process` (atomic), never `read` + `modify`.
- *  - the target line is re-verified against `expectedText` *inside*
- *    `process`, against the data `process` itself hands over — a stale edit
- *    is skipped (`line-changed`), never guessed at.
- *  - still a checkbox, or skipped (`not-a-task`).
- *  - a missing file is skipped (`file-missing`), never created.
- *  - one `process` call per file, however many edits land in it.
- *  - only the target lines change; everything else round-trips through the
- *    same split/join, line-ending flavour included.
+ * Every safety property lives here and nowhere else — atomic `vault.process`,
+ * the target line re-checked against what was read, a refusal rather than a
+ * guess when it moved, one write per file however many edits it carries, the
+ * file's own line endings preserved, and never a throw. Callers supply only
+ * the line transform.
+ *
+ * Extracted when a second kind of edit (ticking a task from the rail) arrived:
+ * two copies of this loop is exactly how the checks drift apart, and the
+ * property this codebase gates on is that there is only one of them.
  */
-export async function editPlacements(app: App, edits: PlacementEdit[]): Promise<WriteResult> {
+async function rewriteVerifiedLines<T extends VerifiedEdit>(
+  app: App,
+  edits: T[],
+  transform: (current: string, edit: T) => string,
+): Promise<WriteResult> {
   const skipped: WriteSkip[] = [];
   const errors: string[] = [];
   let written = 0;
@@ -126,10 +137,7 @@ export async function editPlacements(app: App, edits: PlacementEdit[]): Promise<
             continue;
           }
 
-          lines[e.line] = applyPlacement(current, {
-            range: e.range,
-            scheduledDate: e.scheduledDate,
-          });
+          lines[e.line] = transform(current, e);
           applied.add(key);
         }
 
@@ -151,6 +159,51 @@ export async function editPlacements(app: App, edits: PlacementEdit[]): Promise<
 // ---------------------------------------------------------------------------
 // acceptProposals — a `Proposal`-shaped caller of editPlacements
 // ---------------------------------------------------------------------------
+
+/** Set, change or remove a Day Planner placement on a verified line. */
+export async function editPlacements(app: App, edits: PlacementEdit[]): Promise<WriteResult> {
+  return rewriteVerifiedLines(app, edits, (current, e) =>
+    applyPlacement(current, { range: e.range, scheduledDate: e.scheduledDate }),
+  );
+}
+
+/** The checkbox itself: leading whitespace, list marker, `[ ]` or `[x]`. */
+const CHECKBOX_MARK_RE = /^(\s*[-*]\s*\[)([ xX])(\])/;
+
+export interface TaskDoneEdit extends VerifiedEdit {
+  /** Where the checkbox should end up. */
+  done: boolean;
+}
+
+/**
+ * Tick or untick a task from the rail, so the pane is not a read-only window
+ * onto work you then have to go and edit by hand.
+ *
+ * Ticking stamps a completion date and unticking removes it — both via
+ * `withCompletion` / `clearCompletion` in the ported `taskmeta.ts`, which
+ * already match the line's own emoji-or-inline flavour. No date syntax is
+ * invented here.
+ */
+export async function setTaskDone(app: App, edits: TaskDoneEdit[]): Promise<WriteResult> {
+  const now = new Date();
+  const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+    now.getDate(),
+  ).padStart(2, '0')}`;
+
+  return rewriteVerifiedLines(app, edits, (current, e) => {
+    // Flip the box, then apply the completion field to the **body** only.
+    //
+    // `clearCompletion` (ported, and not ours to change) collapses any run of
+    // two or more spaces to one — which includes a line's leading indentation.
+    // Run against a whole line it de-indents it, and an indented line is
+    // exactly what splitting writes for each sitting of a task, so ticking one
+    // would silently break the parent/child structure. Splitting the prefix off
+    // first is the same discipline `applyPlacement` already uses.
+    const flipped = current.replace(CHECKBOX_MARK_RE, `$1${e.done ? 'x' : ' '}$3`);
+    const { prefix, body } = splitTaskPrefix(flipped);
+    return prefix + (e.done ? withCompletion(body, iso) : clearCompletion(body));
+  });
+}
 
 export interface AcceptProposalsOptions {
   /** True when `path`'s day-`day` slot is a daily note — its own filename

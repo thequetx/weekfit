@@ -5,6 +5,7 @@
 import { useState } from 'react';
 import type { FitState, WeekSnapshot, WeekfitSettings, WriteResult } from '../data/contract';
 import { fmtWeekRange } from '../lib/week';
+import type { VaultTask } from '../lib/types';
 import { WeekGrid } from '../components/WeekGrid';
 import { IntentionsRail } from '../components/IntentionsRail';
 import { CapacityLine } from '../components/CapacityLine';
@@ -49,6 +50,17 @@ export interface WeekViewRootProps {
   onReplan: () => void;
   /** Open the weekly review, where roll-forward lives. */
   onReview: () => void;
+  // --- acting on an unscheduled task, without leaving the pane -------------
+  /** Open any task's own line in its note — rail rows included, so a row is
+   *  never a dead end. */
+  onOpenTask: (file: string, line: number) => void;
+  /** Tick or untick a task from the rail. */
+  onToggleDone: (file: string, line: number, text: string, done: boolean) => void;
+  /** Place a rail task by hand at a day and time — the manual counterpart to
+   *  "Fit this week". */
+  onScheduleTask: (file: string, line: number, text: string, day: number, startMin: number) => void;
+  /** Right-click a rail row; the caller builds the menu. */
+  onTaskMenu: (file: string, line: number, text: string, x: number, y: number) => void;
   // --- Phase 2C: manipulating a block already on the grid ------------------
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
@@ -108,6 +120,10 @@ export function WeekViewRoot({
   onCreateWeekNote,
   onReplan,
   onReview,
+  onOpenTask,
+  onToggleDone,
+  onScheduleTask,
+  onTaskMenu,
   onMoveBlock,
   onUnschedule,
   onOpenSource,
@@ -118,6 +134,10 @@ export function WeekViewRoot({
   // fires — the loading branch returns early, but only after this runs, so
   // the hook order stays stable across a snapshot arriving on a later render.
   const [errorsDismissed, setErrorsDismissed] = useState(false);
+  // A task picked up in the rail and not yet dropped. Held here rather than in
+  // either child because the gesture starts in one (the rail) and finishes in
+  // the other (the grid, which owns the geometry).
+  const [incoming, setIncoming] = useState<{ task: VaultTask; minutes: number } | null>(null);
 
   if (!snapshot) {
     return (
@@ -171,9 +191,27 @@ export function WeekViewRoot({
             Today
           </button>
         </div>
-        <button type="button" className="weekfit-head__refresh" onClick={onRefresh}>
-          Refresh
-        </button>
+        <div className="weekfit-head__right">
+          {/* Which note is this week? Until now the header showed only a date
+              range, so the relationship between what is on screen and what is
+              on disk was left to be inferred — and rail rows can come from
+              other files entirely. */}
+          {snapshot.notePath ? (
+            <button
+              type="button"
+              className="weekfit-head__note"
+              title={`Open ${snapshot.notePath}`}
+              onClick={() => onOpenTask(snapshot.notePath as string, 0)}
+            >
+              {snapshot.notePath}
+            </button>
+          ) : (
+            <span className="weekfit-head__note weekfit-head__note--none">no note yet</span>
+          )}
+          <button type="button" className="weekfit-head__refresh" onClick={onRefresh}>
+            Refresh
+          </button>
+        </div>
       </header>
 
       {/* Phase 2 — the button that makes the whole pitch true, the capacity
@@ -297,8 +335,24 @@ export function WeekViewRoot({
           onOpenSource={onOpenSource}
           onResizeBlock={onResizeBlock}
           onResizeProposal={onResizeProposal}
+          incoming={incoming}
+          onIncomingEnd={() => setIncoming(null)}
+          onDropTask={(task, day, startMin) =>
+            onScheduleTask(task.file, task.line, task.text, day, startMin)
+          }
         />
-        <IntentionsRail tasks={unscheduledSource} durations={settings.durations} />
+        <IntentionsRail
+          tasks={unscheduledSource}
+          durations={settings.durations}
+          weeklyNotePath={snapshot.notePath}
+          onOpenTask={(t) => onOpenTask(t.file, t.line)}
+          onToggleDone={(t) => onToggleDone(t.file, t.line, t.text, !t.done)}
+          onContextMenu={(t, e) => {
+            e.preventDefault();
+            onTaskMenu(t.file, t.line, t.text, e.clientX, e.clientY);
+          }}
+          onDragStart={(task, minutes) => setIncoming({ task, minutes })}
+        />
       </div>
     </div>
   );

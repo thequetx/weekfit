@@ -37,6 +37,15 @@ interface Split {
   body: string;
 }
 
+/** Exported so the writer can apply a transform to a task line's *body* and
+ *  put the prefix back untouched. `clearCompletion` in the ported
+ *  `taskmeta.ts` collapses any run of two or more spaces — including leading
+ *  indentation — so ticking an indented sub-task through it would de-indent
+ *  the line and quietly break the parent/child structure splitting writes. */
+export function splitTaskPrefix(line: string): Split {
+  return splitPrefix(line);
+}
+
 function splitPrefix(line: string): Split {
   const m = PREFIX_RE.exec(line);
   if (!m) return { prefix: '', body: line };

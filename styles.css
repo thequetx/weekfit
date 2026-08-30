@@ -1114,3 +1114,108 @@
 .weekfit-fitbar__review:hover {
   background: var(--background-modifier-hover);
 }
+
+/* ---------------------------------------------------------------------------
+   Acting on a rail task, and saying which note a week is
+   -------------------------------------------------------------------------*/
+
+/* Which note backs the week on screen. Previously the header showed only a
+   date range, leaving the relationship between screen and disk to be
+   inferred. */
+.weekfit-head__right {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.weekfit-head__note {
+  cursor: pointer;
+  max-width: 22ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--radius-s);
+  background: transparent;
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
+
+.weekfit-head__note:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.weekfit-head__note--none {
+  cursor: default;
+  font-style: italic;
+  color: var(--text-faint);
+}
+
+.weekfit-head__note--none:hover {
+  background: transparent;
+}
+
+/* The tick box on a rail row. */
+.weekfit-rail__check {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 3px;
+  background: var(--background-primary);
+}
+
+.weekfit-rail__check:hover {
+  border-color: var(--interactive-accent);
+  background: var(--background-modifier-hover);
+}
+
+/* A rail row's title is draggable onto the grid and clickable to open. */
+.weekfit-rail__title {
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.weekfit-rail__title:active {
+  cursor: grabbing;
+}
+
+/* Where a task lives, when that isn't the weekly note. Shown because ticking
+   or scheduling such a row writes to a file the user was not otherwise told
+   about. */
+.weekfit-rail__source {
+  flex: 0 0 auto;
+  max-width: 14ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 4px;
+  border-radius: var(--radius-s);
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--text-faint) 12%, transparent);
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller, 0.75em);
+}
+
+/* The block a rail task will become, previewed while it is being dragged in. */
+.weekfit-grid__incoming {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  z-index: 5;
+  overflow: hidden;
+  padding: 2px 4px;
+  pointer-events: none;
+  border: 1px dashed var(--interactive-accent);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+}

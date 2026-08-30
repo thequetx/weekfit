@@ -2,10 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { bodyHeight, endHour, gridHours, minutesForY, startHour, yForMinutes } from '../lib/grid';
 import { DAY_NAMES, addDays, dayIndex, fmtHourLabel, fmtMinutes, sameDate } from '../lib/week';
-import type { CalEvent, SkeletonBlock } from '../lib/types';
+import type { CalEvent, SkeletonBlock, VaultTask } from '../lib/types';
 import type { Gap, Proposal, ProposalConflict } from '../lib/gaps';
 import { proposalConflict, snapToGap } from '../lib/gaps';
 import { SNAP_MINUTES, snapToGrid } from '../lib/duration';
+import { parseTaskMeta } from '../lib/taskmeta';
 import { EventBlock, eventMinutes } from './EventBlock';
 import { NowLine } from './NowLine';
 import { GhostBlock } from './GhostBlock';
@@ -41,6 +42,17 @@ export interface WeekGridProps {
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
   onOpenSource: (uid: string) => void;
+  /**
+   * A task the rail has started dragging onto the grid, or `null`. The grid
+   * owns the geometry, so it resolves the drop; the rail only says what is
+   * being dragged and how long it is.
+   */
+  incoming: { task: VaultTask; minutes: number } | null;
+  /** Where an incoming task was dropped. Not called if it never moved, or if
+   *  it was released outside the grid. */
+  onDropTask: (task: VaultTask, day: number, startMin: number) => void;
+  /** The incoming drag ended, however it ended — so the caller can clear it. */
+  onIncomingEnd: () => void;
   /**
    * Edge-drag resize — a block's top edge re-times its start (end fixed), its
    * bottom edge re-times its end (start fixed). Reports only the *final*
@@ -115,6 +127,9 @@ type DragKind =
   | 'ghost-resize-bottom'
   | 'event-resize-top'
   | 'event-resize-bottom'
+  // A task dragged in from the rail — it has no block on the grid yet, so the
+  // preview is drawn from nothing rather than moved from somewhere.
+  | 'incoming'
   | null;
 
 /** Grid quantum a resized edge snaps to, and — since a block can never be
@@ -254,6 +269,9 @@ export function WeekGrid({
   onMoveBlock,
   onUnschedule,
   onOpenSource,
+  incoming,
+  onDropTask,
+  onIncomingEnd,
   onResizeBlock,
   onResizeProposal,
 }: WeekGridProps) {
@@ -285,6 +303,10 @@ export function WeekGrid({
   // `useEffect`, and `useEffect` only re-fires when a *state* value it reads
   // changes.
   const [dragKind, setDragKind] = useState<DragKind>(null);
+  const incomingRef = useRef<{ moved: boolean } | null>(null);
+  const [incomingPreview, setIncomingPreview] = useState<{ day: number; startMin: number } | null>(
+    null,
+  );
 
   function dayAt(clientX: number): number {
     let bestIdx = 0;
@@ -446,6 +468,62 @@ export function WeekGrid({
       const endMin = clampBottomEdge(snapped, drag.anchorMin);
       setGhostResizePreview({ key: drag.proposal.key, startMin: drag.anchorMin, endMin });
     }
+  }
+
+  // --- a task dragged in from the rail -----------------------------------
+  //
+  // Same window-listener discipline as every other drag here, and for the same
+  // reason: the pointer starts over the rail, travels across the grid, and
+  // must keep being tracked the whole way. An element-bound handler would lose
+  // it the moment it crossed the boundary.
+
+  function beginIncoming() {
+    incomingRef.current = { moved: false };
+    setDragKind('incoming');
+  }
+
+  function handleIncomingMove(e: PointerEvent) {
+    const drag = incomingRef.current;
+    if (!drag || !incoming) return;
+    drag.moved = true;
+    const day = dayAt(e.clientX);
+    const startMin = clampToGrid(snapToGrid(minutesAt(day, e.clientY)), incoming.minutes);
+    setIncomingPreview({ day, startMin });
+  }
+
+  function handleIncomingEnd(e: PointerEvent) {
+    const drag = incomingRef.current;
+    const task = incoming;
+    incomingRef.current = null;
+    setIncomingPreview(null);
+    setDragKind(null);
+    onIncomingEnd();
+    if (!drag || !task || !drag.moved) return;
+
+    // Released outside the grid — no day column contains the pointer — is a
+    // cancelled drag, not a drop at the nearest edge. Placing work somewhere
+    // the user did not point at is the board deciding.
+    if (!withinGrid(e.clientX, e.clientY)) return;
+
+    const day = dayAt(e.clientX);
+    const startMin = clampToGrid(snapToGrid(minutesAt(day, e.clientY)), task.minutes);
+    onDropTask(task.task, day, startMin);
+  }
+
+  /** Keep a placement inside the rendered hours. */
+  function clampToGrid(startMin: number, minutes: number): number {
+    const lo = startHour * 60;
+    const hi = endHour * 60 - minutes;
+    return Math.max(lo, Math.min(startMin, Math.max(lo, hi)));
+  }
+
+  /** Is the pointer actually over the grid body? */
+  function withinGrid(clientX: number, clientY: number): boolean {
+    return bodyRefs.current.some((el) => {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      return clientX >= r.left && clientX < r.right && clientY >= r.top && clientY < r.bottom;
+    });
   }
 
   function handleWindowGhostResizeEnd(e: PointerEvent) {
@@ -658,6 +736,15 @@ export function WeekGrid({
   // pair down and stands up the new one whenever a drag starts or ends, and
   // the same cleanup function is what React runs on unmount, so a pane
   // closed mid-drag can't leave anything behind either.
+  // The rail starts the gesture (it owns the pointerdown) but the grid owns
+  // the geometry, so the grid takes over the moment a task is handed to it.
+  // Keyed on `incoming` rather than started by a callback, because the rail
+  // has no way to reach into this component's drag machine.
+  useEffect(() => {
+    if (incoming && dragKind === null) beginIncoming();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming]);
+
   useEffect(() => {
     if (dragKind === 'ghost') {
       window.addEventListener('pointermove', handleWindowDragMove);
@@ -687,6 +774,16 @@ export function WeekGrid({
         window.removeEventListener('pointermove', handleWindowEventResizeMove);
         window.removeEventListener('pointerup', handleWindowEventResizeEnd);
         window.removeEventListener('pointercancel', handleWindowEventResizeEnd);
+      };
+    }
+    if (dragKind === 'incoming') {
+      window.addEventListener('pointermove', handleIncomingMove);
+      window.addEventListener('pointerup', handleIncomingEnd);
+      window.addEventListener('pointercancel', handleIncomingEnd);
+      return () => {
+        window.removeEventListener('pointermove', handleIncomingMove);
+        window.removeEventListener('pointerup', handleIncomingEnd);
+        window.removeEventListener('pointercancel', handleIncomingEnd);
       };
     }
     if (dragKind === 'ghost-resize-top' || dragKind === 'ghost-resize-bottom') {
@@ -843,6 +940,25 @@ export function WeekGrid({
                 );
               })}
 
+              {/* A rail task mid-flight. Drawn dashed and accent-tinted so it
+                  reads as "about to be", like a ghost — because until the
+                  pointer comes up nothing has been written. */}
+              {incomingPreview && incomingPreview.day === di && incoming && (
+                <div
+                  className="weekfit-grid__incoming"
+                  style={{
+                    top: yForMinutes(incomingPreview.startMin),
+                    height: Math.max(
+                      yForMinutes(incomingPreview.startMin + incoming.minutes) -
+                        yForMinutes(incomingPreview.startMin),
+                      18,
+                    ),
+                  }}
+                  aria-hidden="true"
+                >
+                  {fmtMinutes(incomingPreview.startMin)} {parseTaskMeta(incoming.task.text).title}
+                </div>
+              )}
               {nowDayIndex === di && <NowLine now={now} />}
             </div>
           </div>

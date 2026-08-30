@@ -74,6 +74,9 @@ function baseProps(overrides: Partial<WeekGridProps> = {}): WeekGridProps {
     onUnschedule: vi.fn(),
     onOpenSource: vi.fn(),
     onResizeBlock: vi.fn(),
+    incoming: null,
+    onDropTask: () => {},
+    onIncomingEnd: () => {},
     onResizeProposal: vi.fn(),
     ...overrides,
   };
