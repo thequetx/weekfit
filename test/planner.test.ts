@@ -94,9 +94,13 @@ describe('computeFit', () => {
   // Deliberately fed the same way that rule is exercised elsewhere in this
   // codebase's tests (duration.test.ts, rail.test.tsx) — `text` as just the
   // task's own body, matching the shape the rule was written to recognise.
-  it('excludes a task whose text already carries a Day Planner range, same rule the rail uses', () => {
+  it('excludes a task that actually became a block on this week, same rule the rail uses', () => {
+    const placed = task('- [ ] 09:00 - 10:30 Already scheduled', { line: 1 });
     const snap = snapshot({
-      tasks: [task('09:00 - 10:30 Already scheduled'), task('Not yet scheduled ~30m')],
+      tasks: [placed, task('- [ ] Not yet scheduled ~30m', { line: 2 })],
+      // What makes it "scheduled" is that it produced a block — not that its
+      // text contains a time.
+      scheduledLines: [placed],
     });
     const s = settings({ windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 17 * 60)] });
 
@@ -216,6 +220,7 @@ describe('computeFit — already-placed work is left alone', () => {
           task('- [ ] 09:00 - 10:30 Fix badge alpha', { line: 1 }),
           task('- [ ] Book dentist', { line: 2 }),
         ],
+        scheduledLines: [task('- [ ] 09:00 - 10:30 Fix badge alpha', { line: 1 })],
       }),
       settings({ windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 17 * 60)] }),
       NOW,
@@ -228,7 +233,10 @@ describe('computeFit — already-placed work is left alone', () => {
 
   it('excludes it from the committed total too', () => {
     const placed = computeFit(
-      snapshot({ tasks: [task('- [ ] 09:00 - 10:30 Fix badge alpha ~90m', { line: 1 })] }),
+      snapshot({
+        tasks: [task('- [ ] 09:00 - 10:30 Fix badge alpha ~90m', { line: 1 })],
+        scheduledLines: [task('- [ ] 09:00 - 10:30 Fix badge alpha ~90m', { line: 1 })],
+      }),
       settings({ windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 17 * 60)] }),
       NOW,
     );
@@ -236,6 +244,32 @@ describe('computeFit — already-placed work is left alone', () => {
   });
 });
 
+describe('computeFit — a range that never became a block is still unscheduled', () => {
+  // The bug this replaced: a line can carry `09:00 - 10:30` and still not be
+  // on the grid — no scheduled date at all, or a date in another week. The
+  // old rule read the text, so those tasks were excluded from the rail *and*
+  // never became blocks: invisible in both places anyone looks. A real note
+  // had eight of them.
+  it('fits a timed line that has no date, so it can be given one', () => {
+    const orphan = task('- [ ] 09:00 - 10:30 Timed but undated', { line: 1 });
+    const fit = computeFit(
+      snapshot({ tasks: [orphan], scheduledLines: [] }),
+      settings({ windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 17 * 60)] }),
+      NOW,
+    );
+    expect(fit.proposals.map((p) => p.title).join(' ')).toContain('Timed but undated');
+  });
+
+  it('fits a timed line whose date lands in another week', () => {
+    const nextWeek = task('- [ ] 12:00 - 14:00 Team sync ⏳ 2026-09-11', { line: 1 });
+    const fit = computeFit(
+      snapshot({ tasks: [nextWeek], scheduledLines: [] }),
+      settings({ windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 17 * 60)] }),
+      NOW,
+    );
+    expect(fit.proposals.map((p) => p.title).join(' ')).toContain('Team sync');
+  });
+});
 describe('computeReplan — what did not happen, re-fitted', () => {
   // A block on Monday morning, and a clock on Wednesday, so it has plainly
   // passed. `scheduledLines[i]` is the task line `scheduled[i]` came from —

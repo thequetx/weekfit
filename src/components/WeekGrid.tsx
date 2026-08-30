@@ -699,7 +699,14 @@ export function WeekGrid({
     endMin: number,
     excludeUid?: string,
   ): ProposalConflict | null {
-    const events = excludeUid ? scheduled.filter((e) => e.uid !== excludeUid) : scheduled;
+    // `hiddenUid` is the block a pending split is about to become. It is still
+    // in `scheduled` — only its drawing is suppressed — so without excluding
+    // it, every sitting overlapping its old footprint is flagged as
+    // conflicting with the very block it replaces. That is what splitting in a
+    // busy week looked like: a wall of conflicts, all of them against itself.
+    const events = scheduled.filter(
+      (e) => e.uid !== excludeUid && (hiddenUid == null || e.uid !== hiddenUid),
+    );
     return proposalConflict(weekStart, day, startMin, endMin, blocks, events);
   }
 

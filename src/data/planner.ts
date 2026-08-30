@@ -10,7 +10,7 @@ import type { Proposal } from '../lib/gaps';
 import { committedMinutes, snapToGrid } from '../lib/duration';
 import { passedBlocks, replanFit } from '../lib/replan';
 import { applyPlacement, hasPlacement } from './dayplanner';
-import { isUnscheduled } from './sessions';
+import { isRailTask } from './sessions';
 import type { VaultTask } from '../lib/types';
 import type { Capacity, FitState, WeekfitSettings, WeekSnapshot } from './contract';
 
@@ -22,7 +22,7 @@ import type { Capacity, FitState, WeekfitSettings, WeekSnapshot } from './contra
  */
 function unscheduledTasks(snapshot: WeekSnapshot): VaultTask[] {
   return [...snapshot.tasks, ...snapshot.thisweek].filter((t) =>
-    isUnscheduled(t, snapshot.scheduledLines, hasPlacement),
+    isRailTask(t, snapshot.scheduledLines),
   );
 }
 

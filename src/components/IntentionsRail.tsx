@@ -3,8 +3,7 @@ import { fmtEstimate, resolveTaskDuration } from '../lib/duration';
 import type { TaskDuration } from '../lib/duration';
 import { PRIORITY_EMOJI, compareMeta, fmtDue, isOverdue, parseTaskMeta } from '../lib/taskmeta';
 import type { TaskMeta } from '../lib/taskmeta';
-import { hasPlacement } from '../data/dayplanner';
-import { isUnscheduled } from '../data/sessions';
+import { isRailTask } from '../data/sessions';
 import type { DurationMap, VaultTask } from '../lib/types';
 
 /** Phase 2 seam — a proposed placement from "Fit this week". Never populated
@@ -102,7 +101,7 @@ export function IntentionsRail({
   const today = todayIso();
 
   const rows: RailRow[] = tasks
-    .filter((t) => isUnscheduled(t, scheduledLines, hasPlacement))
+    .filter((t) => isRailTask(t, scheduledLines))
     .map((t) => ({
       t,
       meta: parseTaskMeta(t.text),
