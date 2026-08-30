@@ -4,3 +4,7 @@ main.js
 .DS_Store
 coverage/
 release/
+
+# Listing screenshots: source images and their processed 1200x800 output.
+# Local working files — the published copies live on the directory listing.
+shots/
