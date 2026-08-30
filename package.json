@@ -1,16 +1,17 @@
 {
   "name": "weekfit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "Press one button and see where the week's work fits.",
   "scripts": {
     "dev": "node esbuild.config.mjs",
-    "build": "tsc --noEmit && node esbuild.config.mjs production",
+    "build": "npm run check:vendored && tsc --noEmit && node esbuild.config.mjs production",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "deploy": "node scripts/deploy.mjs",
-    "release": "npm run build && node scripts/release.mjs"
+    "release": "npm run build && node scripts/release.mjs",
+    "check:vendored": "node scripts/check-vendored.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

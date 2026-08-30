@@ -39,4 +39,4 @@ One module writes. It re-reads the target line before changing it and **refuses 
 - **Undo is one command, not a guarantee.** `Weekfit: Undo last Weekfit change` puts back the last thing it did, across every file that change touched — but it refuses if you've edited the note since, and it only lasts for the session. Writes still land in your notes immediately, so it's worth a scratch vault for the first hour.
 - No Google Calendar, no AI, no account, no telemetry.
 
-937 tests, including an end-to-end pass that runs the real read → fit → write pipeline against real files on disk and asserts the resulting bytes. MIT.
+905 tests, including an end-to-end pass that runs the real read → fit → write pipeline against real files on disk and asserts the resulting bytes. MIT.
