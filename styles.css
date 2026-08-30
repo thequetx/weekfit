@@ -384,10 +384,20 @@
   outline-offset: -1px;
 }
 
+/* The warning sits in a gutter down the left edge, vertically centred, and
+   the block reserves its width (see `--conflict` padding below).
+
+   It used to be pinned at `top: 2px; left: 5px` — which is precisely where
+   the time label starts, since the block's own padding is `3px 7px`. The two
+   glyphs printed on top of each other: an 8pm block overlaid with `⚠` reads
+   as `4pm`, i.e. not as a rendering fault but as *the wrong time*, which is
+   the worst way for a calendar to be wrong. The `__ses` badge escapes this
+   only because it took the top-right corner, where nothing else lives. */
 .weekfit-ev__conflict {
   position: absolute;
-  top: 2px;
-  left: 5px;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
   font-size: 0.7em;
   color: var(--color-red);
   pointer-events: none;
@@ -816,12 +826,24 @@
   color: var(--text-accent);
 }
 
+/* Same gutter, same reason — see `.weekfit-ev__conflict`. */
 .weekfit-ghost__conflict {
   position: absolute;
-  top: 2px;
-  left: 5px;
+  top: 50%;
+  left: 4px;
+  transform: translateY(-50%);
   font-size: 0.7em;
   color: var(--color-orange);
+  pointer-events: none;
+}
+
+/* Reserves the gutter the marker sits in. This has to come after both
+   `--tight` rules: they set `padding` as a shorthand, which would otherwise
+   reset the left value back to the block's default and put the warning back
+   on top of the text. */
+.weekfit-ev--conflict,
+.weekfit-ghost--conflict {
+  padding-left: 18px;
 }
 
 .weekfit-ghost__actions {
