@@ -36,7 +36,9 @@ export interface WeekGridProps {
   proposals: Proposal[];
   onAccept: (groupKey: string) => void;
   onDismiss: (groupKey: string) => void;
-  onMoveProposal: (groupKey: string, day: number, startMin: number) => void;
+  /** Keyed on the proposal itself (`key`), not its group — moving one sitting
+   *  of a split must not drag the others on top of it. */
+  onMoveProposal: (key: string, day: number, startMin: number) => void;
   /** Phase 2C — re-time, remove, or open the source of a block already on the
    *  grid. `uid` is `${file}:${line}`; `main.ts` resolves it. */
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
@@ -72,7 +74,8 @@ export interface WeekGridProps {
    * mid-drag. `main.ts` turns a resized real block into a vault write.
    */
   onResizeBlock: (uid: string, startMin: number, endMin: number) => void;
-  onResizeProposal: (groupKey: string, startMin: number, endMin: number) => void;
+  /** Keyed on the proposal itself, as `onMoveProposal`. */
+  onResizeProposal: (key: string, startMin: number, endMin: number) => void;
 }
 
 interface DragState {
@@ -427,10 +430,22 @@ export function WeekGrid({
 
     const day = dayAt(e.clientX);
     const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, drag.proposal.minutes);
-    // Nothing on that day fits -> leave the ghost exactly where it was: no
-    // callback, no fallback to another day. See lib/gaps.ts `snapToGap`.
+    // Prefer a legal gap on that day; if there is none, still land where the
+    // pointer actually was.
+    //
+    // Refusing the drop was the old behaviour and it made dragging feel
+    // broken: aiming anywhere outside a gap — which is most of a busy week —
+    // silently snapped the ghost back with no explanation. The board already
+    // marks a placement that overlaps something, so a hand-drop into occupied
+    // time is *information*, not an error. Same rule a real block already
+    // follows, and the same rule conflict marking was built on: mark it, don't
+    // refuse it.
     const snapped = snapToGap(gapList, day, startMin, drag.proposal.minutes);
-    if (snapped) onMoveProposal(drag.proposal.groupKey, snapped.gap.day, snapped.startMin);
+    if (snapped) {
+      onMoveProposal(drag.proposal.key, snapped.gap.day, snapped.startMin);
+    } else {
+      onMoveProposal(drag.proposal.key, day, startMin);
+    }
   }
 
   function positionOf(p: Proposal): { day: number; startMin: number; endMin: number } {
@@ -565,12 +580,12 @@ export function WeekGrid({
       const startMin = clampTopEdge(snapped, drag.anchorMin);
       // Landed back where it started -> nothing to report.
       if (startMin !== drag.origEdgeMin) {
-        onResizeProposal(drag.proposal.groupKey, startMin, drag.anchorMin);
+        onResizeProposal(drag.proposal.key, startMin, drag.anchorMin);
       }
     } else {
       const endMin = clampBottomEdge(snapped, drag.anchorMin);
       if (endMin !== drag.origEdgeMin) {
-        onResizeProposal(drag.proposal.groupKey, drag.anchorMin, endMin);
+        onResizeProposal(drag.proposal.key, drag.anchorMin, endMin);
       }
     }
   }
@@ -651,11 +666,16 @@ export function WeekGrid({
       return;
     }
 
-    // A fit has run: hold a re-time to the same legality a ghost's drop
-    // does. Nothing on that day fits -> leave the block exactly where it
-    // was — no callback at all, same discipline as a ghost's failed drop.
+    // Prefer a gap; otherwise land where the pointer was and let the conflict
+    // marker say so. See the matching note on the ghost drop above — a drag
+    // that silently snaps back reads as broken, and refusing a deliberate
+    // hand-placement is the board overruling the user.
     const snapped = snapToGap(gaps, day, startMin, durationMin);
-    if (snapped) onMoveBlock(drag.ev.uid, snapped.gap.day, snapped.startMin);
+    if (snapped) {
+      onMoveBlock(drag.ev.uid, snapped.gap.day, snapped.startMin);
+    } else {
+      onMoveBlock(drag.ev.uid, day, startMin);
+    }
   }
 
   /** Which day column `ev` currently belongs in — its own day, or the drag

@@ -322,9 +322,15 @@ describe('WeekGrid — drop legality (snapToGap)', () => {
     windowPointer('pointerup', 250, BODY_TOP + yFor(600));
 
     expect(onMoveBlock).toHaveBeenCalledTimes(1);
+
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
   });
 
-  it('gaps present but snapToGap finds nothing: reverts, no callback', () => {
+  // Was: "reverts, no callback". Refusing made dragging feel broken — aiming
+  // anywhere outside a gap, which is most of a busy week, silently snapped the
+  // block back with no explanation. A deliberate hand-placement now lands, and
+  // the conflict marker is what says it overlaps something.
+  it('gaps present but snapToGap finds nothing: still lands where the pointer was', () => {
     const onMoveBlock = vi.fn();
     const ev = calEvent({
       uid: 'Weekly/2026-W36.md:4',
@@ -342,10 +348,10 @@ describe('WeekGrid — drop legality (snapToGap)', () => {
     windowPointer('pointermove', 250, BODY_TOP + yFor(600));
     windowPointer('pointerup', 250, BODY_TOP + yFor(600));
 
-    expect(onMoveBlock).not.toHaveBeenCalled();
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
   });
 
-  it('gaps present but snapToGap finds nothing for a ghost either: reverts, no callback', () => {
+  it('gaps present but snapToGap finds nothing for a ghost either: it still lands', () => {
     const onMoveProposal = vi.fn();
     const p = proposal();
     const { container } = render(
@@ -358,7 +364,7 @@ describe('WeekGrid — drop legality (snapToGap)', () => {
     windowPointer('pointermove', 250, BODY_TOP + yFor(660));
     windowPointer('pointerup', 250, BODY_TOP + yFor(660));
 
-    expect(onMoveProposal).not.toHaveBeenCalled();
+    expect(onMoveProposal).toHaveBeenCalledTimes(1);
   });
 });
 

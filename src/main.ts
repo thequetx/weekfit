@@ -46,6 +46,17 @@ export default class WeekfitPlugin extends Plugin {
   private fit: FitState | null = null;
   private fitting = false;
   private lastWrite: WriteResult | null = null;
+  /**
+   * Groups the user has waved away this round.
+   *
+   * Any write triggers a refresh, and a refresh recomputes the fit — which
+   * regenerates every proposal, including ones already dismissed. Accepting one
+   * ghost therefore brought back all the ghosts you had just cleared. Dismissal
+   * has to outlive the recompute; it is cleared when a *new* fit, replan or
+   * split is asked for, which is the point at which the question is genuinely
+   * being asked again.
+   */
+  private dismissed = new Set<string>();
 
   /** Monday of the week being shown. Not necessarily the current one — the
    *  main reason to open a planner is to plan the week that hasn't happened
@@ -187,7 +198,11 @@ export default class WeekfitPlugin extends Plugin {
     // until they are accepted or cleared — and the writer re-verifies every
     // line before touching it, so a stale one is refused rather than misapplied.
     if (this.fit && this.snapshot && this.fit.replacing == null) {
-      this.fit = computeFit(this.snapshot, this.settings, new Date());
+      const recomputed = computeFit(this.snapshot, this.settings, new Date());
+      this.fit = {
+        ...recomputed,
+        proposals: recomputed.proposals.filter((p) => !this.dismissed.has(p.groupKey)),
+      };
     }
 
     this.pushAll();
@@ -210,6 +225,7 @@ export default class WeekfitPlugin extends Plugin {
       return;
     }
 
+    this.dismissed.clear();
     this.fitting = true;
     this.pushAll();
     try {
@@ -228,12 +244,14 @@ export default class WeekfitPlugin extends Plugin {
   }
 
   private clearFit(): void {
+    this.dismissed.clear();
     this.fit = null;
     this.lastWrite = null;
     this.pushAll();
   }
 
   private dismiss(groupKey: string): void {
+    this.dismissed.add(groupKey);
     if (!this.fit) return;
     this.fit = {
       ...this.fit,
@@ -244,14 +262,16 @@ export default class WeekfitPlugin extends Plugin {
 
   /** A dragged ghost, re-timed but still a ghost. The view has already asked
    *  `snapToGap` whether the destination is legal; this only records it. */
-  private moveProposal(groupKey: string, day: number, startMin: number): void {
+  private moveProposal(key: string, day: number, startMin: number): void {
     if (!this.fit) return;
+    // Keyed on the **individual** proposal, not its group. Matching on
+    // groupKey moved every sitting of a split task to the same slot at once —
+    // they stacked exactly on top of each other and read as a single ghost.
+    // Accept and dismiss are group-shaped; moving and resizing are not.
     this.fit = {
       ...this.fit,
       proposals: this.fit.proposals.map((p) =>
-        p.groupKey === groupKey
-          ? { ...p, day, startMin, endMin: startMin + (p.endMin - p.startMin) }
-          : p,
+        p.key === key ? { ...p, day, startMin, endMin: startMin + (p.endMin - p.startMin) } : p,
       ),
     };
     this.pushAll();
@@ -322,6 +342,7 @@ export default class WeekfitPlugin extends Plugin {
       new Notice('Weekfit: no availability windows set, so there is nowhere to replan into.');
       return;
     }
+    this.dismissed.clear();
     this.fitting = true;
     this.pushAll();
     try {
@@ -471,6 +492,7 @@ export default class WeekfitPlugin extends Plugin {
     };
     const max = maxSittingsFor(target.endMin - target.startMin);
 
+    this.dismissed.clear();
     const apply = (plan: SplitPlan | null) => {
       if (!plan) {
         new Notice('Weekfit: this block is too short to split.');
@@ -725,14 +747,13 @@ export default class WeekfitPlugin extends Plugin {
 
   /** A ghost resized before it's been accepted. Still a proposal, still
    *  nothing written — this only re-sizes the pending placement. */
-  private resizeProposal(groupKey: string, startMin: number, endMin: number): void {
+  private resizeProposal(key: string, startMin: number, endMin: number): void {
     if (!this.fit) return;
+    // Individual, for the same reason as `moveProposal`.
     this.fit = {
       ...this.fit,
       proposals: this.fit.proposals.map((p) =>
-        p.groupKey === groupKey
-          ? { ...p, startMin, endMin, minutes: Math.max(1, endMin - startMin) }
-          : p,
+        p.key === key ? { ...p, startMin, endMin, minutes: Math.max(1, endMin - startMin) } : p,
       ),
     };
     this.pushAll();

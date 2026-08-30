@@ -132,22 +132,36 @@ export function GhostBlock({
           ⚠
         </span>
       )}
-      <div className="weekfit-ghost__actions">
+      {/* On a ghost too short to hold them in flow, the actions are lifted
+          out of the block entirely (see `--escape` in styles.css). They were
+          previously clipped, which left a 30-minute proposal with no way to
+          accept or dismiss it at all. */}
+      <div className={`weekfit-ghost__actions${veryShort ? ' weekfit-ghost__actions--escape' : ''}`}>
         <button
           type="button"
           className="weekfit-ghost__accept"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => onAccept(proposal.groupKey)}
+          title={
+            linked
+              ? `Accept all ${proposal.sessions} sittings of this task`
+              : 'Accept this placement'
+          }
         >
-          Accept
+          {linked ? `Accept all ${proposal.sessions}` : 'Accept'}
         </button>
         <button
           type="button"
           className="weekfit-ghost__dismiss"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => onDismiss(proposal.groupKey)}
+          title={
+            linked
+              ? `Dismiss all ${proposal.sessions} sittings of this task`
+              : 'Dismiss this placement'
+          }
         >
-          Dismiss
+          {linked ? `Dismiss all ${proposal.sessions}` : 'Dismiss'}
         </button>
       </div>
     </div>

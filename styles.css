@@ -1256,3 +1256,25 @@
   border-color: var(--interactive-accent);
   color: var(--text-normal);
 }
+
+/* A ghost shorter than its own controls cannot contain them — they were
+   clipped, leaving a 30-minute proposal with no way to accept or dismiss it.
+   Lift them out of the block and let them overhang to the right, where the
+   only thing they can cover is empty grid. */
+.weekfit-ghost:has(.weekfit-ghost__actions--escape) {
+  overflow: visible;
+}
+
+.weekfit-ghost__actions--escape {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  margin-left: 4px;
+  margin-top: 0;
+  z-index: 6;
+  padding: 2px 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  white-space: nowrap;
+}
