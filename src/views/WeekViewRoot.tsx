@@ -132,6 +132,10 @@ export function WeekViewRoot({
 
   const unscheduledSource = [...snapshot.tasks, ...snapshot.thisweek];
   const showErrors = snapshot.errors.length > 0 && !errorsDismissed;
+  // A fit that placed nothing is still a result — but it is not ghosts, and
+  // the controls have to tell those apart.
+  const hasGhosts = (fit?.proposals.length ?? 0) > 0;
+  const hasFitResult = fit != null && (hasGhosts || fit.unplaced.length > 0);
   const showWriteNotice =
     lastWrite != null && (lastWrite.skipped.length > 0 || lastWrite.errors.length > 0);
 
@@ -185,15 +189,21 @@ export function WeekViewRoot({
           >
             {fitting ? 'Fitting…' : 'Fit this week'}
           </button>
-          {fit && (
-            <>
-              <button type="button" className="weekfit-fitbar__acceptall" onClick={onAcceptAll}>
-                Accept all
-              </button>
-              <button type="button" className="weekfit-fitbar__clear" onClick={onClearFit}>
-                Clear ghosts
-              </button>
-            </>
+          {/* Gated on there actually being ghosts, not merely on a fit having
+              been run. A fit or a replan that places nothing still returns a
+              result object, and offering "Accept all" and "Clear ghosts" over
+              an empty board invites the user to act on nothing. `Clear` stays
+              while there is an unplaced list, since that is a result worth
+              being able to dismiss. */}
+          {hasGhosts && (
+            <button type="button" className="weekfit-fitbar__acceptall" onClick={onAcceptAll}>
+              Accept all
+            </button>
+          )}
+          {hasFitResult && (
+            <button type="button" className="weekfit-fitbar__clear" onClick={onClearFit}>
+              {hasGhosts ? 'Clear ghosts' : 'Clear'}
+            </button>
           )}
           {/* Replan and review were reachable only from the command palette,
               which is no way to surface a weekly ritual — you have to already

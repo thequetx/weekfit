@@ -192,6 +192,35 @@ describe('WeekViewRoot — empty / error states', () => {
   });
 });
 
+describe('WeekViewRoot — an empty fit result offers nothing to act on', () => {
+  // Reported by Tyler: replan correctly said "nothing passed unfinished",
+  // but the board still offered Accept all / Clear ghosts. A fit or replan
+  // that places nothing still returns a result object, and the controls were
+  // gated on that object existing rather than on it containing anything.
+  it('hides Accept all and Clear when a fit produced neither ghosts nor unplaced', () => {
+    renderRoot({ fit: fitState() });
+    expect(screen.queryByRole('button', { name: /accept all/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^clear/i })).not.toBeInTheDocument();
+  });
+
+  it('shows both when there are ghosts', () => {
+    renderRoot({ fit: fitState({ proposals: [proposal()] }) });
+    expect(screen.getByRole('button', { name: /accept all/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /clear ghosts/i })).toBeInTheDocument();
+  });
+
+  // An unplaced list is a real result worth being able to dismiss, but there
+  // is nothing to accept.
+  it('offers Clear but not Accept all when everything went unplaced', () => {
+    renderRoot({
+      fit: fitState({
+        unplaced: [{ key: 'k', title: 'Too big', minutes: 600, reason: 'no-gap' }],
+      }),
+    });
+    expect(screen.queryByRole('button', { name: /accept all/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^clear$/i })).toBeInTheDocument();
+  });
+});
 describe('WeekViewRoot — replan and review are reachable from the board', () => {
   // Both used to exist only as commands. A weekly ritual you have to already
   // know about in order to search for it is not discoverable.

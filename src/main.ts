@@ -207,6 +207,13 @@ export default class WeekfitPlugin extends Plugin {
     } finally {
       this.fitting = false;
     }
+    // Same as replan: an empty result is not something to leave sitting on the
+    // board with controls attached. A week with everything already scheduled
+    // is the common way to reach this.
+    if (this.fit && this.fit.proposals.length === 0 && this.fit.unplaced.length === 0) {
+      this.fit = null;
+      new Notice('Weekfit: nothing left to fit — everything is either scheduled or done.');
+    }
     this.pushAll();
   }
 
@@ -309,7 +316,12 @@ export default class WeekfitPlugin extends Plugin {
     } finally {
       this.fitting = false;
     }
-    if (this.fit && this.fit.proposals.length === 0) {
+    // A result with nothing in it is not a result worth leaving on the board.
+    // The Notice has already said what happened; keeping a non-null `fit`
+    // around would light up "Accept all" and "Clear ghosts" over an empty
+    // week, inviting the user to act on nothing.
+    if (this.fit && this.fit.proposals.length === 0 && this.fit.unplaced.length === 0) {
+      this.fit = null;
       new Notice('Weekfit: nothing has passed unfinished — nothing to replan.');
     }
     this.pushAll();
