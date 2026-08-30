@@ -1,7 +1,8 @@
 import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent } from 'react';
+import { PRIORITY_GLYPH, priorityLabel } from './priority';
 import { fmtEstimate, resolveTaskDuration } from '../lib/duration';
 import type { TaskDuration } from '../lib/duration';
-import { PRIORITY_EMOJI, compareMeta, fmtDue, isOverdue, parseTaskMeta } from '../lib/taskmeta';
+import { compareMeta, fmtDue, isOverdue, parseTaskMeta } from '../lib/taskmeta';
 import type { TaskMeta } from '../lib/taskmeta';
 import { isRailTask } from '../data/sessions';
 import type { DurationMap, VaultTask } from '../lib/types';
@@ -63,8 +64,7 @@ function todayIso(now = new Date()): string {
 const ESTIMATE_HINT: Record<TaskDuration['source'], string> = {
   override: 'estimate written on the task',
   kind: 'default for this kind of task',
-  default: 'global fallback — no tag, no estimate',
-};
+  default: 'global fallback — no tag, no estimate' };
 
 interface RailRow {
   t: VaultTask;
@@ -96,8 +96,7 @@ export function IntentionsRail({
   onOpenTask,
   onToggleDone,
   onDragStart,
-  onContextMenu,
-}: IntentionsRailProps) {
+  onContextMenu }: IntentionsRailProps) {
   const today = todayIso();
 
   const rows: RailRow[] = tasks
@@ -105,8 +104,7 @@ export function IntentionsRail({
     .map((t) => ({
       t,
       meta: parseTaskMeta(t.text),
-      est: resolveTaskDuration(t.text, durations),
-    }))
+      est: resolveTaskDuration(t.text, durations) }))
     .sort((a, b) => compareMeta(a.meta, b.meta));
 
   return (
@@ -152,9 +150,9 @@ export function IntentionsRail({
                 {meta.priority && (
                   <span
                     className={`weekfit-rail__pri weekfit-rail__pri--${meta.priority.level}`}
-                    title={`${meta.priority.level} priority`}
+                    title={priorityLabel(meta.priority.level)}
                   >
-                    {PRIORITY_EMOJI[meta.priority.level]}
+                    {PRIORITY_GLYPH[meta.priority.level]}
                   </span>
                 )}
                 <span

@@ -501,24 +501,36 @@
   background: var(--background-secondary);
 }
 
+/* Priority, drawn as a text glyph rather than the standard's emoji — see
+   src/components/priority.ts. These colour rules existed before and could
+   never take effect: an emoji carries its own colour and ignores `color`. */
 .weekfit-rail__pri {
-  font-size: 0.85em;
-  line-height: 1;
   flex: none;
+  width: 0.9em;
+  text-align: center;
+  font-size: 0.8em;
+  line-height: 1;
 }
 
-.weekfit-rail__pri--highest,
-.weekfit-rail__pri--high {
+/* Only the top two earn a colour. Everything below is a shape, so a week of
+   ordinary tasks does not turn into a traffic-light display and the two that
+   genuinely matter still stand out. */
+.weekfit-rail__pri--highest {
   color: var(--color-red);
+  font-size: 0.95em;
+}
+
+.weekfit-rail__pri--high {
+  color: var(--color-orange);
 }
 
 .weekfit-rail__pri--medium {
-  color: var(--color-orange);
+  color: var(--text-muted);
 }
 
 .weekfit-rail__pri--low,
 .weekfit-rail__pri--lowest {
-  color: var(--text-muted);
+  color: var(--text-faint);
 }
 
 .weekfit-rail__title {

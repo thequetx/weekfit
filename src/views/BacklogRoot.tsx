@@ -10,7 +10,8 @@
 import type { BacklogItem } from '../data/backlog';
 import { fmtEstimate } from '../lib/duration';
 import type { TaskDuration } from '../lib/duration';
-import { fmtDue, isOverdue, PRIORITY_EMOJI } from '../lib/taskmeta';
+import { fmtDue, isOverdue } from '../lib/taskmeta';
+import { PRIORITY_GLYPH, priorityLabel } from '../components/priority';
 
 export interface BacklogRootProps {
   items: BacklogItem[];
@@ -33,8 +34,7 @@ function todayIso(now = new Date()): string {
 const ESTIMATE_HINT: Record<TaskDuration['source'], string> = {
   override: 'estimate written on the task',
   kind: 'default for this kind of task',
-  default: 'global fallback — no tag, no estimate',
-};
+  default: 'global fallback — no tag, no estimate' };
 
 /**
  * The backlog: everything unscheduled across the configured folders, sized
@@ -82,9 +82,9 @@ export function BacklogRoot({ items, onOpenSource }: BacklogRootProps) {
                 {meta.priority && (
                   <span
                     className={`weekfit-backlog__pri weekfit-backlog__pri--${meta.priority.level}`}
-                    title={`${meta.priority.level} priority`}
+                    title={priorityLabel(meta.priority.level)}
                   >
-                    {PRIORITY_EMOJI[meta.priority.level]}
+                    {PRIORITY_GLYPH[meta.priority.level]}
                   </span>
                 )}
                 <span className="weekfit-backlog__title">{meta.title}</span>
