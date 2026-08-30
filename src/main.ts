@@ -476,11 +476,16 @@ export default class WeekfitPlugin extends Plugin {
         new Notice('Weekfit: this block is too short to split.');
         return;
       }
+      // Real capacity for the week, not zeroes. A hand-rolled empty `Capacity`
+      // renders as "no availability windows set" — false, and alarming, while
+      // the user is only reconsidering one block. The gaps come with it, so a
+      // split ghost snaps against the same lattice everything else does.
+      const week = computeFit(snap, this.settings, new Date());
       this.fit = {
-        gaps: [],
+        gaps: week.gaps,
         proposals: plan.proposals,
         unplaced: plan.unplaced,
-        capacity: { committedMin: 0, freeMin: null, overBy: 0 },
+        capacity: week.capacity,
         replacing: plan.replacing,
       };
       if (plan.unplaced.length) {
@@ -554,6 +559,19 @@ export default class WeekfitPlugin extends Plugin {
         return r;
       },
       onRollForward: async () => {
+        // Seed next week's note first if it doesn't exist. `appendUnderHeading`
+        // will happily create a file containing nothing but `## Tasks`, which
+        // is not a weekly note: no frontmatter for the year-of-weeks table, no
+        // `## Intentions`, and no `## Review` for the review flow to write into
+        // when that week ends. Rolling work into a malformed note is a quiet
+        // way to break the week you're rolling into.
+        if (!this.app.vault.getAbstractFileByPath(nextWeekPath)) {
+          await createNote(
+            this.app,
+            nextWeekPath,
+            weeklyNoteTemplate(addWeeks(this.weekStart, 1), { withExamples: false }),
+          );
+        }
         const r = await rollForward(this.app, snapshot, review, nextWeekPath, this.settings);
         await this.refresh();
         return r;
