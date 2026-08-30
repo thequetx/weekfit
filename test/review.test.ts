@@ -209,6 +209,70 @@ describe('computeReview', () => {
   });
 });
 
+describe('computeReview — work still to come is not "unfinished"', () => {
+  // Reported by Tyler: rolling forward mid-week moved everything, including
+  // work booked for later the same week. That task has not failed — it has
+  // not come up yet — and rolling it strips its placement on the way out.
+  //
+  // Wednesday 09:00. The Monday block has been and gone; the Friday one has
+  // not.
+  const WED = (() => {
+    const d = addDays(WEEK_START, 2);
+    d.setHours(9, 0, 0, 0);
+    return d;
+  })();
+
+  function block(day: number, startMin: number, minutes: number, title: string, uid: string) {
+    const start = addDays(WEEK_START, day);
+    start.setMinutes(startMin);
+    const end = new Date(start.getTime() + minutes * 60_000);
+    return { uid, title, start, end, allDay: false };
+  }
+
+  const week = () =>
+    snapshot({
+      tasks: [
+        task('- [ ] 09:00 - 10:00 Monday thing ⏳ 2026-08-31', { line: 1 }),
+        task('- [ ] 09:00 - 10:00 Friday thing ⏳ 2026-09-04', { line: 2 }),
+        task('- [ ] Never scheduled at all', { line: 3 }),
+      ],
+      scheduled: [
+        block(0, 9 * 60, 60, 'Monday thing', 'Weekly/2026-W36.md:1'),
+        block(4, 9 * 60, 60, 'Friday thing', 'Weekly/2026-W36.md:2'),
+      ],
+      scheduledLines: [
+        task('- [ ] 09:00 - 10:00 Monday thing ⏳ 2026-08-31', { line: 1 }),
+        task('- [ ] 09:00 - 10:00 Friday thing ⏳ 2026-09-04', { line: 2 }),
+      ],
+    });
+
+  it('leaves a task still scheduled later in the week alone', () => {
+    const r = computeReview(week(), settings, WED);
+    const titles = r.unfinished.map((t) => t.text);
+    expect(titles.join(' ')).not.toContain('Friday thing');
+  });
+
+  it('still rolls a task whose block has been and gone', () => {
+    const r = computeReview(week(), settings, WED);
+    expect(r.unfinished.map((t) => t.text).join(' ')).toContain('Monday thing');
+  });
+
+  it('still rolls a task that was never scheduled', () => {
+    const r = computeReview(week(), settings, WED);
+    expect(r.unfinished.map((t) => t.text).join(' ')).toContain('Never scheduled at all');
+  });
+
+  it('rolls everything once the week is actually over', () => {
+    const after = addDays(WEEK_START, 8);
+    const r = computeReview(week(), settings, after);
+    expect(r.unfinished).toHaveLength(3);
+    expect(r.weekHasEnded).toBe(true);
+  });
+
+  it('reports the week as not ended when it is mid-week', () => {
+    expect(computeReview(week(), settings, WED).weekHasEnded).toBe(false);
+  });
+});
 // --- writeReview ----------------------------------------------------------
 
 describe('writeReview', () => {

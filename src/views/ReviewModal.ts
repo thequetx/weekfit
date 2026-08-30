@@ -99,6 +99,18 @@ export class ReviewModal extends Modal {
       }
     }
 
+    // Reviewing mid-week is legitimate, but rolling forward then means
+    // something different, and the button looks identical either way. Say so.
+    if (!review.weekHasEnded) {
+      contentEl.createEl('p', {
+        cls: 'mod-warning',
+        text:
+          'This week is not over yet. Anything still scheduled later in the week is left ' +
+          'where it is — only work that has already been and gone, or was never scheduled ' +
+          'at all, is listed below.',
+      });
+    }
+
     contentEl.createEl('h4', { text: `Unfinished (${review.unfinished.length})` });
     if (review.unfinished.length > 0) {
       const list = contentEl.createEl('ul');

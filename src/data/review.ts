@@ -28,6 +28,9 @@ import { auditNoteLines, auditWeek } from '../lib/audit';
 import type { WeekAudit } from '../lib/audit';
 import { isRecurring, taskTitle } from '../lib/taskmeta';
 import { withDayPlannerRange } from '../lib/source';
+import { applyPlacement } from './dayplanner';
+import { futureSessions } from '../lib/gaps';
+import { addDays } from '../lib/week';
 import type { VaultTask } from '../lib/types';
 import { appendUnderHeading, removeLines, setFrontmatter } from './writer';
 import type { RemoveLineEdit } from './writer';
@@ -42,8 +45,15 @@ export interface WeekReview {
   tasksDone: number;
   intentionsTotal: number;
   intentionsDone: number;
-  /** Not done, not ticked — the candidates to carry into next week. */
+  /**
+   * The candidates to carry into next week: not done, not recurring, and
+   * **not still scheduled in the future** — a task booked for Friday has not
+   * failed on Tuesday, it simply has not come up yet.
+   */
   unfinished: VaultTask[];
+  /** Whether the reviewed week is actually over. Reviewing mid-week is fine,
+   *  but it changes what rolling forward means, so the modal says so. */
+  weekHasEnded: boolean;
 }
 
 /** Minutes as the hours a property should hold — one decimal, matching
@@ -104,9 +114,31 @@ export function computeReview(
   // own next instance — carrying one forward would duplicate it and fight
   // whatever `🏁` says should happen next. `intentions` never rolls: Phase 5
   // §2's definition is tasks and `#thisweek` lines only.
+  //
+  // And nothing that is **still going to happen**. Rolling a task booked for
+  // Friday because the review was opened on Tuesday moves work that has not
+  // failed — it has not even come up yet — and strips its placement on the
+  // way out. "Carry forward what didn't happen" is not "carry forward what
+  // hasn't happened yet".
+  //
+  // `futureSessions` is exactly that question, and `fitTasks` already uses it
+  // to leave booked work alone. It matches an event to a task by title, so
+  // the line needs its range stripped first: the event's title comes from
+  // `scheduledEvents`, which removes the `HH:MM` range, while `parseTaskMeta`
+  // deliberately keeps it in the task's display title. Same trap
+  // `computeReplan` had to step around.
+  const stillToCome = (t: VaultTask): boolean =>
+    futureSessions(snapshot.scheduled, { ...t, text: applyPlacement(t.text, { range: null, scheduledDate: null }) }, now)
+      .length > 0;
+
   const unfinished = [...snapshot.tasks, ...snapshot.thisweek].filter(
-    (t) => !t.done && !isRecurring(t.text),
+    (t) => !t.done && !isRecurring(t.text) && !stillToCome(t),
   );
+
+  // Whether the week being reviewed is actually over. Reviewing mid-week is a
+  // legitimate thing to do, but it changes what roll-forward means, and the
+  // modal says so rather than letting the button look the same either way.
+  const weekHasEnded = now.getTime() >= addDays(snapshot.weekStart, 7).getTime();
 
   return {
     weekId: snapshot.weekId,
@@ -118,6 +150,7 @@ export function computeReview(
     intentionsTotal: snapshot.intentions.length,
     intentionsDone: snapshot.intentions.filter((t) => t.done).length,
     unfinished,
+    weekHasEnded,
   };
 }
 
