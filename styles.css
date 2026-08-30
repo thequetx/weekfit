@@ -489,7 +489,12 @@
 .weekfit-rail__item {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  /* Deliberately no wrapping. A long title used to push the estimate — or the
+     source chip — onto a second line, which made the rail read as a ragged
+     list instead of a column you can scan. The title truncates instead: it is
+     the one part still legible when shortened, and the full text is in the
+     row's tooltip and one click away in the note. */
+  flex-wrap: nowrap;
   gap: 4px 6px;
   padding: 4px 6px;
   border-radius: var(--radius-m);
@@ -518,10 +523,17 @@
 
 .weekfit-rail__title {
   flex: 1 1 auto;
-  min-width: 60px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.85em;
   color: var(--text-normal);
-  overflow-wrap: anywhere;
+}
+
+.weekfit-rail__est,
+.weekfit-rail__due {
+  flex: 0 0 auto;
 }
 
 .weekfit-rail__due {
@@ -1257,24 +1269,29 @@
   color: var(--text-normal);
 }
 
-/* A ghost shorter than its own controls cannot contain them — they were
-   clipped, leaving a 30-minute proposal with no way to accept or dismiss it.
-   Lift them out of the block and let them overhang to the right, where the
-   only thing they can cover is empty grid. */
-.weekfit-ghost:has(.weekfit-ghost__actions--escape) {
-  overflow: visible;
-}
-
+/* A ghost shorter than its own controls cannot contain them in flow — they
+   get clipped, leaving a 30-minute proposal with no way to accept or dismiss
+   it at all.
+   
+   They are pinned to the ghost's own right edge instead, *inside its day
+   column*. An earlier attempt overhung to the right (`left: 100%`) on the
+   reasoning that it would only cover empty grid — it doesn't: it lands in the
+   next day's column, where the buttons read as orphaned controls belonging to
+   nothing, and a screenshot of a busy week made that obvious immediately. The
+   title truncates to make room, which is the right thing to lose. */
 .weekfit-ghost__actions--escape {
   position: absolute;
-  top: 0;
-  left: 100%;
-  margin-left: 4px;
+  top: 1px;
+  right: 2px;
+  left: auto;
   margin-top: 0;
   z-index: 6;
-  padding: 2px 4px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--background-primary);
+  gap: 2px;
   white-space: nowrap;
+}
+
+.weekfit-ghost__actions--escape button {
+  padding: 0 4px;
+  font-size: var(--font-ui-smaller, 0.7em);
+  line-height: 1.4;
 }
