@@ -9,6 +9,8 @@ import { collectBacklog } from './data/backlog';
 import { computeReview, rollForward, writeReview } from './data/review';
 import { ReviewModal } from './views/ReviewModal';
 import { weeklyNoteTemplate } from './data/template';
+import { maxSittingsFor, planSplit, planSplitAuto } from './data/split';
+import type { SplitPlan, SplitTarget } from './data/split';
 import {
   acceptProposals,
   appendUnderHeading,
@@ -30,7 +32,7 @@ import type { Proposal } from './lib/gaps';
 import { dayPlannerRange } from './lib/source';
 import { taskTitle } from './lib/taskmeta';
 import { resolveTaskDuration, snapToGrid } from './lib/duration';
-import { addDays, addWeeks, startOfISOWeek } from './lib/week';
+import { addDays, addWeeks, dayIndex, minutesOfDay, startOfISOWeek } from './lib/week';
 
 /** How often the now-line moves. A minute is the resolution it's drawn at, so
  *  anything finer is repaint for nothing. */
@@ -179,7 +181,12 @@ export default class WeekfitPlugin extends Plugin {
     // them, so a stale proposal could point at a line that has moved.
     // Recompute rather than redraw: the alternative is offering a placement we
     // can no longer honour, which the writer would refuse later anyway.
-    if (this.fit && this.snapshot) {
+    // A pending split is not a fit result and must not be recomputed as one:
+    // `computeFit` would replace its sittings with an ordinary proposal set
+    // and the block being split would reappear underneath. The ghosts stand
+    // until they are accepted or cleared — and the writer re-verifies every
+    // line before touching it, so a stale one is refused rather than misapplied.
+    if (this.fit && this.snapshot && this.fit.replacing == null) {
       this.fit = computeFit(this.snapshot, this.settings, new Date());
     }
 
@@ -279,10 +286,13 @@ export default class WeekfitPlugin extends Plugin {
     // written keeps a refused group on screen with its reason attached,
     // rather than vanishing as though it had worked.
     const refused = new Set(result.skipped.map((s) => s.key));
-    this.fit = {
-      ...this.fit,
-      proposals: this.fit.proposals.filter((p) => !keys.has(p.groupKey) || refused.has(p.groupKey)),
-    };
+    const remaining = this.fit.proposals.filter(
+      (p) => !keys.has(p.groupKey) || refused.has(p.groupKey),
+    );
+    // Nothing left to decide on — drop the whole result, which also stops
+    // hiding the block a split was replacing. Leaving `replacing` set with no
+    // ghosts would blank a block that is now perfectly real.
+    this.fit = remaining.length === 0 ? null : { ...this.fit, proposals: remaining };
 
     if (result.errors.length) {
       new Notice(`Weekfit: ${result.errors.length} file(s) could not be written — see the view.`);
@@ -435,6 +445,68 @@ export default class WeekfitPlugin extends Plugin {
         title: taskTitle(text),
       },
     ]);
+  }
+
+  /**
+   * Offer to break a placed block into sittings.
+   *
+   * Fitting splits automatically when nothing else will do; this is the case
+   * where it *does* fit and you'd still rather not do it in one go. The result
+   * is ghosts, not a write — the same as every other proposal here.
+   */
+  private splitMenu(uid: string, x: number, y: number): void {
+    const snap = this.snapshot;
+    if (!snap) return;
+    const i = snap.scheduled.findIndex((e) => e.uid === uid);
+    const ev = snap.scheduled[i];
+    const line = snap.scheduledLines[i];
+    if (!ev || !line) return;
+
+    const target: SplitTarget = {
+      uid,
+      task: line,
+      day: dayIndex(ev.start, snap.weekStart),
+      startMin: minutesOfDay(ev.start),
+      endMin: minutesOfDay(ev.end),
+    };
+    const max = maxSittingsFor(target.endMin - target.startMin);
+
+    const apply = (plan: SplitPlan | null) => {
+      if (!plan) {
+        new Notice('Weekfit: this block is too short to split.');
+        return;
+      }
+      this.fit = {
+        gaps: [],
+        proposals: plan.proposals,
+        unplaced: plan.unplaced,
+        capacity: { committedMin: 0, freeMin: null, overBy: 0 },
+        replacing: plan.replacing,
+      };
+      if (plan.unplaced.length) {
+        new Notice(`Weekfit: ${plan.unplaced.length} sitting(s) had nowhere to go.`);
+      }
+      this.pushAll();
+    };
+
+    const menu = new Menu();
+    for (let n = 2; n <= max; n++) {
+      menu.addItem((item) =>
+        item.setTitle(`${n} sittings`).onClick(() => {
+          apply(planSplit(snap, this.settings, new Date(), target, n));
+        }),
+      );
+    }
+    menu.addSeparator();
+    menu.addItem((item) =>
+      item
+        .setTitle('Fit — fewest that will fit')
+        .setIcon('calendar-range')
+        .onClick(() => {
+          apply(planSplitAuto(snap, this.settings, new Date(), target));
+        }),
+    );
+    menu.showAtPosition({ x, y });
   }
 
   private taskMenu(file: string, line: number, text: string, x: number, y: number): void {
@@ -723,6 +795,7 @@ export default class WeekfitPlugin extends Plugin {
           ) => void this.scheduleTask(file, line, text, day, startMin),
           onTaskMenu: (file: string, line: number, text: string, x: number, y: number) =>
             this.taskMenu(file, line, text, x, y),
+          onSplitBlock: (uid: string, x: number, y: number) => this.splitMenu(uid, x, y),
           onPrevWeek: () => void this.goToWeek(addWeeks(this.weekStart, -1)),
           onNextWeek: () => void this.goToWeek(addWeeks(this.weekStart, 1)),
           onToday: () => void this.goToWeek(new Date()),

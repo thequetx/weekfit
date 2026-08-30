@@ -60,6 +60,10 @@ export interface WeekGridProps {
    * gesture people reach for first.
    */
   isOverRail?: (clientX: number, clientY: number) => boolean;
+  /** A block not to draw — it is being replaced by the ghosts on screen. */
+  hiddenUid?: string | null;
+  /** Split this block into sittings; the caller asks how many. */
+  onSplit?: (uid: string, x: number, y: number) => void;
   /**
    * Edge-drag resize — a block's top edge re-times its start (end fixed), its
    * bottom edge re-times its end (start fixed). Reports only the *final*
@@ -280,6 +284,8 @@ export function WeekGrid({
   onDropTask,
   onIncomingEnd,
   isOverRail,
+  hiddenUid,
+  onSplit,
   onResizeBlock,
   onResizeProposal,
 }: WeekGridProps) {
@@ -848,7 +854,9 @@ export function WeekGrid({
       </div>
 
       {days.map((day, di) => {
-        const dayEvents = scheduled.filter((e) => !e.allDay && eventDayOf(e) === di);
+        const dayEvents = scheduled.filter(
+          (e) => !e.allDay && e.uid !== hiddenUid && eventDayOf(e) === di,
+        );
         const allDay = scheduled.filter((e) => e.allDay && dayIndex(e.start, weekStart) === di);
         const dayBlocks = blocks.filter((b) => b.days.includes(di));
         const dayGaps = gapList.filter((g) => g.day === di);
@@ -941,6 +949,7 @@ export function WeekGrid({
                     resizing={eventResizePreview?.uid === e.uid}
                     conflict={conflict}
                     onUnschedule={onUnschedule}
+                    onSplit={onSplit}
                     onDragStart={handleEventDragStart}
                     onResizeStart={handleEventResizeStart}
                   />

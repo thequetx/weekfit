@@ -143,6 +143,13 @@ export interface FitState {
   proposals: Proposal[];
   unplaced: Unplaced[];
   capacity: Capacity;
+  /**
+   * The uid of a block these ghosts are about to become — set when a split is
+   * pending. The grid stops drawing it while the ghosts are up, because a
+   * ghost sitting on top of the block it replaces reads as two commitments
+   * rather than one being reconsidered.
+   */
+  replacing?: string;
 }
 
 /**

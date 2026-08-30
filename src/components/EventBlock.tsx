@@ -1,5 +1,6 @@
 import type { PointerEvent } from 'react';
 import { yForMinutes } from '../lib/grid';
+import { canSplit } from '../data/split';
 import { fmtClock, fmtMinutes, minutesOfDay, sameDate } from '../lib/week';
 import type { CalEvent } from '../lib/types';
 import type { ProposalConflict } from '../lib/gaps';
@@ -31,6 +32,10 @@ export interface EventBlockProps {
    */
   conflict?: ProposalConflict | null;
   onUnschedule: (uid: string) => void;
+  /** Break this block into sittings. Absent, or on a block too short to
+   *  split, the control simply isn't drawn — a disabled button people cannot
+   *  explain to themselves is worse than no button. */
+  onSplit?: (uid: string, x: number, y: number) => void;
   /** Starts the drag. `WeekGrid` takes it from here — once a drag is live it
    *  tracks pointermove/pointerup/pointercancel on `window`, not on this
    *  element (a React pointermove/up prop here would only fire while the
@@ -107,6 +112,7 @@ export function EventBlock({
   resizing,
   conflict,
   onUnschedule,
+  onSplit,
   onDragStart,
   onResizeStart,
 }: EventBlockProps) {
@@ -169,6 +175,24 @@ export function EventBlock({
         <span className="weekfit-ev__conflict" aria-hidden="true">
           ⚠
         </span>
+      )}
+      {/* Only on a block long enough to become two hour-long sittings. A
+          disabled control on a 45-minute block raises a question the block
+          itself cannot answer. */}
+      {onSplit && canSplit(endMin - startMin) && (
+        <button
+          type="button"
+          className="weekfit-ev__split"
+          aria-label={`Split "${ev.title}" into sittings`}
+          title="Split into sittings"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSplit(ev.uid, e.clientX, e.clientY);
+          }}
+        >
+          Split
+        </button>
       )}
       <button
         type="button"

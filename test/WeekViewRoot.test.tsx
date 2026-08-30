@@ -129,6 +129,7 @@ function renderRoot(overrides: Partial<WeekViewRootProps> = {}) {
     onToggleDone: noop,
     onScheduleTask: noop,
     onTaskMenu: noop,
+    onSplitBlock: noop,
     onMoveBlock: noop,
     onUnschedule: noop,
     onOpenSource: noop,

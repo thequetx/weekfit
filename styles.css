@@ -1228,3 +1228,31 @@
   flex-direction: column;
   min-height: 0;
 }
+
+/* Split, above Unschedule on a block long enough to become two sittings. */
+.weekfit-ev__split {
+  position: absolute;
+  right: 4px;
+  bottom: 22px;
+  z-index: 4;
+  cursor: pointer;
+  padding: 0 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller, 0.75em);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.weekfit-ev:hover .weekfit-ev__split,
+.weekfit-ev__split:focus-visible {
+  opacity: 1;
+}
+
+.weekfit-ev__split:hover {
+  border-color: var(--interactive-accent);
+  color: var(--text-normal);
+}

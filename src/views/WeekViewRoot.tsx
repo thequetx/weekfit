@@ -61,6 +61,8 @@ export interface WeekViewRootProps {
   onScheduleTask: (file: string, line: number, text: string, day: number, startMin: number) => void;
   /** Right-click a rail row; the caller builds the menu. */
   onTaskMenu: (file: string, line: number, text: string, x: number, y: number) => void;
+  /** Break a placed block into sittings; the caller asks how many. */
+  onSplitBlock: (uid: string, x: number, y: number) => void;
   // --- Phase 2C: manipulating a block already on the grid ------------------
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
@@ -124,6 +126,7 @@ export function WeekViewRoot({
   onToggleDone,
   onScheduleTask,
   onTaskMenu,
+  onSplitBlock,
   onMoveBlock,
   onUnschedule,
   onOpenSource,
@@ -347,6 +350,8 @@ export function WeekViewRoot({
           incoming={incoming}
           onIncomingEnd={() => setIncoming(null)}
           isOverRail={isOverRail}
+          hiddenUid={fit?.replacing ?? null}
+          onSplit={onSplitBlock}
           onDropTask={(task, day, startMin) =>
             onScheduleTask(task.file, task.line, task.text, day, startMin)
           }

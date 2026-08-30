@@ -890,6 +890,20 @@ export async function replaceChildSessions(
             end++;
           }
 
+          // A parent with sittings carries no time of its own — the sittings
+          // are when it happens. Splitting a block that was already placed
+          // would otherwise leave the parent's range in place beside its new
+          // children, which is the same "one task, several bookings"
+          // duplication `editPlacements` retires sittings to prevent, arriving
+          // from the other direction.
+          //
+          // Only when there are sittings to write: clearing them (`sessions:
+          // []`) leaves the parent exactly as it is, since it is going back to
+          // being an ordinary task.
+          if (e.sessions.length > 0) {
+            lines[e.line] = applyPlacement(current, { range: null, scheduledDate: null });
+          }
+
           lines.splice(e.line + 1, end - (e.line + 1), ...e.sessions);
           written++;
         }
