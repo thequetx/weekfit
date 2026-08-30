@@ -541,12 +541,61 @@
 /* Priority, drawn as a text glyph rather than the standard's emoji — see
    src/components/priority.ts. These colour rules existed before and could
    never take effect: an emoji carries its own colour and ignores `color`. */
+/* These three are `<button>`s now — the value *is* the control, so editing a
+   due date happens where the due date already is. A button carries a browser
+   default background, border, padding and font that would each redraw the
+   row, so every one is stripped: at rest they must be pixel-for-pixel what
+   they were as spans, and only become visibly clickable on hover. */
+.weekfit-rail__pri,
+.weekfit-rail__due,
+.weekfit-rail__est {
+  background: none;
+  border: none;
+  border-radius: var(--radius-s);
+  padding: 0 2px;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.weekfit-rail__pri:hover,
+.weekfit-rail__due:hover,
+.weekfit-rail__est:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.weekfit-rail__pri:focus-visible,
+.weekfit-rail__due:focus-visible,
+.weekfit-rail__est:focus-visible {
+  box-shadow: 0 0 0 2px var(--interactive-accent);
+  outline: none;
+}
+
 .weekfit-rail__pri {
   flex: none;
-  width: 0.9em;
+  width: 1.4em;
   text-align: center;
   font-size: 0.8em;
   line-height: 1;
+}
+
+/* Nothing written yet. The placeholder is invisible until the row is hovered
+   or the control is tabbed to, so a rail of ordinary tasks is not permanently
+   speckled with dots and plus signs for the sake of an affordance. It still
+   occupies its space, so no row shifts on hover. */
+.weekfit-rail__pri--unset,
+.weekfit-rail__due--unset {
+  color: var(--text-faint);
+  opacity: 0;
+}
+
+.weekfit-rail__item:hover .weekfit-rail__pri--unset,
+.weekfit-rail__item:hover .weekfit-rail__due--unset,
+.weekfit-rail__pri--unset:focus-visible,
+.weekfit-rail__due--unset:focus-visible {
+  opacity: 1;
 }
 
 /* Only the top two earn a colour. Everything below is a shape, so a week of

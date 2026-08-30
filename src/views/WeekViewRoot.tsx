@@ -61,6 +61,9 @@ export interface WeekViewRootProps {
   onScheduleTask: (file: string, line: number, text: string, day: number, startMin: number) => void;
   /** Right-click a rail row; the caller builds the menu. */
   onTaskMenu: (file: string, line: number, text: string, x: number, y: number) => void;
+  onSetDue: (file: string, line: number, text: string, x: number, y: number) => void;
+  onSetPriority: (file: string, line: number, text: string, x: number, y: number) => void;
+  onSetEstimate: (file: string, line: number, text: string, x: number, y: number) => void;
   /** Break a placed block into sittings; the caller asks how many. */
   onSplitBlock: (uid: string, x: number, y: number) => void;
   // --- Phase 2C: manipulating a block already on the grid ------------------
@@ -126,6 +129,9 @@ export function WeekViewRoot({
   onToggleDone,
   onScheduleTask,
   onTaskMenu,
+  onSetDue,
+  onSetPriority,
+  onSetEstimate,
   onSplitBlock,
   onMoveBlock,
   onUnschedule,
@@ -368,6 +374,9 @@ export function WeekViewRoot({
             e.preventDefault();
             onTaskMenu(t.file, t.line, t.text, e.clientX, e.clientY);
           }}
+          onSetDue={(t, e) => onSetDue(t.file, t.line, t.text, e.clientX, e.clientY)}
+          onSetPriority={(t, e) => onSetPriority(t.file, t.line, t.text, e.clientX, e.clientY)}
+          onSetEstimate={(t, e) => onSetEstimate(t.file, t.line, t.text, e.clientX, e.clientY)}
           onDragStart={(task, minutes) => setIncoming({ task, minutes })}
         />
         </div>

@@ -58,12 +58,21 @@ describe('priority is drawn as theme-coloured text, not an emoji', () => {
   // screen reader and not obvious to anyone who hasn't learned the scheme.
   it('names the priority in words as well', () => {
     rail([task('Highest 🔺', 1)]);
-    expect(screen.getByTitle('highest priority')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Priority: highest priority' })).toBeInTheDocument();
+    expect(screen.getByTitle(/highest priority/)).toBeInTheDocument();
   });
 
-  it('shows nothing at all for a task with no priority written', () => {
+  // The marker became the control that sets it, so it is rendered on every
+  // row to keep the row's shape stable. What a task with no priority must not
+  // show is a *level* — see `--unset`, which is transparent until hover.
+  it('shows no priority glyph for a task with none written', () => {
     const { container } = rail([task('Just a task')]);
-    expect(container.querySelector('.weekfit-rail__pri')).toBeNull();
+    const mark = container.querySelector('.weekfit-rail__pri')!;
+    expect(mark.classList.contains('weekfit-rail__pri--unset')).toBe(true);
+    for (const level of PRIORITIES) {
+      expect(mark.classList.contains(`weekfit-rail__pri--${level}`)).toBe(false);
+    }
+    expect(mark.getAttribute('aria-label')).toBe('Set priority for "Just a task"');
   });
 
   it('has a glyph for every level the standard defines', () => {

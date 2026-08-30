@@ -50,6 +50,19 @@ export interface IntentionsRailProps {
   /** Right-click. The caller builds an Obsidian `Menu`; the rail only reports
    *  which row and where. */
   onContextMenu?: (task: VaultTask, e: ReactMouseEvent) => void;
+  /**
+   * Edit one of the three fields the row already displays.
+   *
+   * These are deliberately not new buttons. The row is dense, and the due
+   * chip, duration chip and priority glyph are already sitting there saying
+   * what the values are — so they *become* the controls, which puts the
+   * affordance exactly where the information is and adds no visual weight to
+   * a resting row. Same division of labour as `onContextMenu`: the rail
+   * reports which row and where, the caller opens an Obsidian `Menu`.
+   */
+  onSetDue?: (task: VaultTask, e: ReactMouseEvent) => void;
+  onSetPriority?: (task: VaultTask, e: ReactMouseEvent) => void;
+  onSetEstimate?: (task: VaultTask, e: ReactMouseEvent) => void;
 }
 
 /** Today, in the machine's local timezone, as `YYYY-MM-DD` — what a task's
@@ -96,7 +109,10 @@ export function IntentionsRail({
   onOpenTask,
   onToggleDone,
   onDragStart,
-  onContextMenu }: IntentionsRailProps) {
+  onContextMenu,
+  onSetDue,
+  onSetPriority,
+  onSetEstimate }: IntentionsRailProps) {
   const today = todayIso();
 
   const rows: RailRow[] = tasks
@@ -147,14 +163,30 @@ export function IntentionsRail({
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => onToggleDone?.(t)}
                 />
-                {meta.priority && (
-                  <span
-                    className={`weekfit-rail__pri weekfit-rail__pri--${meta.priority.level}`}
-                    title={priorityLabel(meta.priority.level)}
-                  >
-                    {PRIORITY_GLYPH[meta.priority.level]}
-                  </span>
-                )}
+                {/* Always rendered, so the control is in the same place on
+                    every row. With no priority written it is a faint dot that
+                    only shows on hover or keyboard focus — a resting row looks
+                    exactly as it did before any of this existed. */}
+                <button
+                  type="button"
+                  className={`weekfit-rail__pri weekfit-rail__pri--${
+                    meta.priority?.level ?? 'unset'
+                  }`}
+                  title={
+                    meta.priority
+                      ? `${priorityLabel(meta.priority.level)} — click to change`
+                      : 'Set priority'
+                  }
+                  aria-label={
+                    meta.priority
+                      ? `Priority: ${priorityLabel(meta.priority.level)}`
+                      : `Set priority for "${meta.title}"`
+                  }
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => onSetPriority?.(t, e)}
+                >
+                  {meta.priority ? PRIORITY_GLYPH[meta.priority.level] : '·'}
+                </button>
                 <span
                   className="weekfit-rail__title"
                   role="button"
@@ -176,19 +208,40 @@ export function IntentionsRail({
                     {shortSource}
                   </span>
                 )}
-                {due && (
-                  <span
-                    className={`weekfit-rail__due${overdue ? ' weekfit-rail__due--overdue' : ''}`}
-                    title={`due ${due.date}${overdue ? ' — overdue' : ''}`}
-                  >
-                    {fmtDue(due.date)}
-                  </span>
-                )}
-                <span
+                {/* Same again: with no due date this is a `+` that appears on
+                    hover, so an undated row is not permanently louder than it
+                    used to be for the sake of a control. */}
+                <button
+                  type="button"
+                  className={`weekfit-rail__due${overdue ? ' weekfit-rail__due--overdue' : ''}${
+                    due ? '' : ' weekfit-rail__due--unset'
+                  }`}
+                  title={
+                    due
+                      ? `Due ${due.date}${overdue ? ' — overdue' : ''}. Click to change.`
+                      : 'Set a due date'
+                  }
+                  aria-label={
+                    due
+                      ? `Due ${due.date}${overdue ? ', overdue' : ''}`
+                      : `Set a due date for "${meta.title}"`
+                  }
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => onSetDue?.(t, e)}
+                >
+                  {due ? fmtDue(due.date) : '+'}
+                </button>
+                <button
+                  type="button"
                   className={`weekfit-rail__est weekfit-rail__est--${est.source}`}
                   title={`${fmtEstimate(est.minutes)} — ${
                     est.kind ? `#${est.kind} ` : ''
-                  }${ESTIMATE_HINT[est.source]}`}
+                  }${ESTIMATE_HINT[est.source]}. Click to change.`}
+                  aria-label={`Duration ${fmtEstimate(est.minutes)}${
+                    guessed ? ' (estimated)' : ''
+                  } for "${meta.title}"`}
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onClick={(e) => onSetEstimate?.(t, e)}
                 >
                   {guessed && (
                     <span className="weekfit-rail__est-guess" aria-hidden="true">
@@ -196,7 +249,7 @@ export function IntentionsRail({
                     </span>
                   )}
                   {fmtEstimate(est.minutes)}
-                </span>
+                </button>
               </li>
             );
           })}

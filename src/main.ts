@@ -20,6 +20,7 @@ import {
   editPlacements,
   isoDateFor,
   setTaskDone,
+  setTaskFields,
 } from './data/writer';
 import { SettingsTab } from './settings/SettingsTab';
 import { DEFAULT_SETTINGS } from './data/contract';
@@ -32,8 +33,12 @@ import type {
 } from './data/contract';
 import type { Proposal } from './lib/gaps';
 import { dayPlannerRange } from './lib/source';
-import { taskTitle } from './lib/taskmeta';
-import { resolveTaskDuration, snapToGrid } from './lib/duration';
+import { fmtDue, parseTaskMeta, PRIORITIES, taskTitle } from './lib/taskmeta';
+import type { PriorityName } from './lib/taskmeta';
+import { PRIORITY_GLYPH } from './components/priority';
+import { DURATION_CHOICES, dueChoices } from './data/dates';
+import { DueDateModal } from './views/DueDateModal';
+import { fmtEstimate, resolveTaskDuration, snapToGrid } from './lib/duration';
 import { addDays, addWeeks, dayIndex, minutesOfDay, startOfISOWeek } from './lib/week';
 
 /** How often the now-line moves. A minute is the resolution it's drawn at, so
@@ -458,6 +463,117 @@ export default class WeekfitPlugin extends Plugin {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // Editing the three fields the rail already displays
+  //
+  // Each menu opens from the chip showing the value, so the control sits where
+  // the information is. All three land in `setTaskFields`, which is
+  // `rewriteVerifiedLines` plus a transform — so they inherit the refusal on a
+  // line that moved, and `applyWrite` journals them, so undo covers them free.
+  // -------------------------------------------------------------------------
+
+  private async setField(
+    label: string,
+    file: string,
+    line: number,
+    text: string,
+    fields: { due?: string | null; priority?: PriorityName; estimate?: number | null },
+  ): Promise<void> {
+    await this.applyWrite(label, () =>
+      setTaskFields(this.app, [
+        { file, line, expectedText: text, title: taskTitle(text), ...fields },
+      ]),
+    );
+  }
+
+  private dueMenu(file: string, line: number, text: string, x: number, y: number): void {
+    const current = parseTaskMeta(text).dates.due?.date ?? null;
+    const menu = new Menu();
+
+    for (const choice of dueChoices(new Date())) {
+      menu.addItem((i) =>
+        i
+          .setTitle(`${choice.label} — ${fmtDue(choice.date)}`)
+          // Ticked when it is the date already on the line, so the menu says
+          // what the value *is* rather than only offering to replace it.
+          .setChecked(choice.date === current)
+          .onClick(() => void this.setField('Set due date', file, line, text, { due: choice.date })),
+      );
+    }
+
+    menu.addSeparator();
+    menu.addItem((i) =>
+      i
+        .setTitle('Pick a date…')
+        .setIcon('calendar')
+        .onClick(() => {
+          new DueDateModal(this.app, {
+            title: taskTitle(text),
+            current,
+            onPick: (date) => void this.setField('Set due date', file, line, text, { due: date }),
+          }).open();
+        }),
+    );
+
+    if (current) {
+      menu.addItem((i) =>
+        i
+          .setTitle('Clear due date')
+          .setIcon('x')
+          .onClick(() => void this.setField('Clear due date', file, line, text, { due: null })),
+      );
+    }
+
+    menu.showAtPosition({ x, y });
+  }
+
+  private priorityMenu(file: string, line: number, text: string, x: number, y: number): void {
+    const current = parseTaskMeta(text).priority?.level ?? 'none';
+    const menu = new Menu();
+
+    // Most urgent first, with `none` in the middle where the plugin's own
+    // ranking puts it — an unmarked task is not the least urgent one.
+    for (const level of PRIORITIES) {
+      menu.addItem((i) =>
+        i
+          .setTitle(level === 'none' ? 'None' : `${PRIORITY_GLYPH[level]}  ${level}`)
+          .setChecked(level === current)
+          .onClick(() => void this.setField('Set priority', file, line, text, { priority: level })),
+      );
+    }
+
+    menu.showAtPosition({ x, y });
+  }
+
+  private estimateMenu(file: string, line: number, text: string, x: number, y: number): void {
+    // What the *line* says, not what the ladder resolved to — clearing is only
+    // offered when there is something written to clear, and a `#tag` default
+    // is not something this menu put there.
+    const written = parseTaskMeta(text).fields['wd:est']?.minutes ?? null;
+    const menu = new Menu();
+
+    for (const minutes of DURATION_CHOICES) {
+      menu.addItem((i) =>
+        i
+          .setTitle(fmtEstimate(minutes))
+          .setChecked(minutes === written)
+          .onClick(() => void this.setField('Set duration', file, line, text, { estimate: minutes })),
+      );
+    }
+
+    if (written != null) {
+      menu.addSeparator();
+      menu.addItem((i) =>
+        i
+          .setTitle('Clear — fall back to the #tag default')
+          .setIcon('x')
+          .onClick(() => void this.setField('Clear duration', file, line, text, { estimate: null })),
+      );
+    }
+
+    menu.showAtPosition({ x, y });
+  }
+
   /**
    * Place a rail task by hand. The same verified write accepting a proposal
    * uses — a hand-drop is a different way of choosing a slot, not a different
@@ -591,6 +707,30 @@ export default class WeekfitPlugin extends Plugin {
         .setIcon('check')
         .onClick(() => void this.toggleDone(file, line, text, true)),
     );
+    menu.addSeparator();
+    // The same three menus the rail's own chips open. Duplicated here because
+    // right-click is where a lot of people look first, and a control that
+    // exists only on a chip you have to notice is a control half the users
+    // never find.
+    menu.addItem((i) =>
+      i
+        .setTitle('Due date…')
+        .setIcon('calendar')
+        .onClick(() => this.dueMenu(file, line, text, x, y)),
+    );
+    menu.addItem((i) =>
+      i
+        .setTitle('Duration…')
+        .setIcon('clock')
+        .onClick(() => this.estimateMenu(file, line, text, x, y)),
+    );
+    menu.addItem((i) =>
+      i
+        .setTitle('Priority…')
+        .setIcon('signal')
+        .onClick(() => this.priorityMenu(file, line, text, x, y)),
+    );
+    menu.addSeparator();
     menu.addItem((i) =>
       i
         .setTitle('Fit this week')
@@ -920,6 +1060,12 @@ export default class WeekfitPlugin extends Plugin {
           ) => void this.scheduleTask(file, line, text, day, startMin),
           onTaskMenu: (file: string, line: number, text: string, x: number, y: number) =>
             this.taskMenu(file, line, text, x, y),
+          onSetDue: (file: string, line: number, text: string, x: number, y: number) =>
+            this.dueMenu(file, line, text, x, y),
+          onSetPriority: (file: string, line: number, text: string, x: number, y: number) =>
+            this.priorityMenu(file, line, text, x, y),
+          onSetEstimate: (file: string, line: number, text: string, x: number, y: number) =>
+            this.estimateMenu(file, line, text, x, y),
           onSplitBlock: (uid: string, x: number, y: number) => this.splitMenu(uid, x, y),
           onPrevWeek: () => void this.goToWeek(addWeeks(this.weekStart, -1)),
           onNextWeek: () => void this.goToWeek(addWeeks(this.weekStart, 1)),

@@ -21,6 +21,8 @@ Weekfit reads the tasks you already have, the hours you're actually available, a
 
 No new syntax required. A plain checkbox line works on day one. If you do annotate, Weekfit reads the [Obsidian Tasks](https://publish.obsidian.md/tasks/) standard in **both** flavours — emoji and Dataview inline fields — plus a `~90m` duration extension. All of it optional.
 
+And you can set them without leaving the pane. The due date, duration and priority shown on each rail row **are** the controls — click one for a short menu. What gets written is the dialect the line is already in: an emoji line gets `📅`, an inline line gets `[due:: …]`, and a line with neither gets the emoji the Tasks plugin defaults to. Nothing is reordered and nothing else on the line is touched.
+
 ## Plan with us, view it wherever you like
 
 Weekfit writes **Day Planner format** — the same `HH:MM - HH:MM` lines the Day Planner plugin already renders. Nothing has to be switched. If you stop using Weekfit tomorrow, your plan is still sitting in your notes in a format other tools understand.
@@ -37,4 +39,4 @@ One module writes. It re-reads the target line before changing it and **refuses 
 - **Undo is one command, not a guarantee.** `Weekfit: Undo last Weekfit change` puts back the last thing it did, across every file that change touched — but it refuses if you've edited the note since, and it only lasts for the session. Writes still land in your notes immediately, so it's worth a scratch vault for the first hour.
 - No Google Calendar, no AI, no account, no telemetry.
 
-854 tests, including an end-to-end pass that runs the real read → fit → write pipeline against real files on disk and asserts the resulting bytes. MIT.
+937 tests, including an end-to-end pass that runs the real read → fit → write pipeline against real files on disk and asserts the resulting bytes. MIT.

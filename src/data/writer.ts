@@ -25,6 +25,8 @@ import type { Proposal } from '../lib/gaps';
 import { dayPlannerRange, DAY_PLANNER_RE } from '../lib/source';
 import { addDays } from '../lib/week';
 import { clearCompletion, parseTaskMeta, taskTitle, withCompletion } from '../lib/taskmeta';
+import type { PriorityName } from '../lib/taskmeta';
+import { withDue, withEstimate, withPriority } from './taskfields';
 import type { MetaFlavour } from '../lib/taskmeta';
 import { applyPlacement, hasPlacement, splitTaskPrefix } from './dayplanner';
 import type { PlacementEdit, WriteResult, WriteSkip } from './contract';
@@ -256,6 +258,43 @@ const CHECKBOX_MARK_RE = /^(\s*[-*]\s*\[)([ xX])(\])/;
 export interface TaskDoneEdit extends VerifiedEdit {
   /** Where the checkbox should end up. */
   done: boolean;
+}
+
+/**
+ * A change to one or more of the three fields Weekfit can now edit.
+ *
+ * Each is optional, and **`undefined` means "leave it alone"** — which is not
+ * the same as `null`, which clears the field. Setting a due date must not
+ * silently strip a priority the user put there by hand, so an edit states
+ * only what it intends to change.
+ */
+export interface TaskFieldEdit extends VerifiedEdit {
+  due?: string | null;
+  priority?: PriorityName;
+  estimate?: number | null;
+}
+
+/**
+ * Set due date, priority and/or duration on a verified line.
+ *
+ * Every safety property comes from `rewriteVerifiedLines` — the line is
+ * re-read and refused if it moved, the file is written once however many
+ * edits it carries, its line endings survive, and the change is journalled,
+ * so undo covers this for free. All this adds is which transforms to run.
+ *
+ * These are the first fields Weekfit writes that were already the user's to
+ * write: a range and a `✅` stamp are the plugin's own marks, but a due date
+ * is something the user typed. `taskfields.ts` carries the care that needs —
+ * flavour preservation, indentation, and never going near `🔁`.
+ */
+export async function setTaskFields(app: App, edits: TaskFieldEdit[]): Promise<WriteResult> {
+  return rewriteVerifiedLines(app, edits, (current, e) => {
+    let out = current;
+    if (e.due !== undefined) out = withDue(out, e.due);
+    if (e.priority !== undefined) out = withPriority(out, e.priority);
+    if (e.estimate !== undefined) out = withEstimate(out, e.estimate);
+    return out;
+  });
 }
 
 /**
