@@ -153,7 +153,7 @@ keep in sync. You can override it.
 
 **Not yet released.** The planning engine, the vault adapter, the week view, fitting and
 its write path, splitting, replan, review, backlog and capture are all built and in daily
-use by the author. **787 tests**, including component tests and an end-to-end pass that
+use by the author. **815 tests**, including component tests and an end-to-end pass that
 runs the real read → fit → write pipeline against real files on disk and asserts the
 resulting bytes.
 

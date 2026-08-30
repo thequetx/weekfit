@@ -61,6 +61,28 @@ export interface GhostBlockProps {
  *  the ghost's own minimum rendered height (20px, vs. the real block's 18). */
 const SHORT_BLOCK_PX = 24;
 
+/**
+ * Below this, the ghost lays out as a row and drops its time label.
+ *
+ * A ghost has three things to show and, at an hour or less, room for two. The
+ * order they matter in is not the order they happened to be written in:
+ *
+ *  1. **The title.** The only thing the grid cannot tell you by itself.
+ *  2. **Accept / Dismiss.** The block's entire purpose; a proposal you can't
+ *     act on is just clutter.
+ *  3. **The time.** The block's *position on a calendar* already says this,
+ *     and the hover title repeats it exactly.
+ *
+ * It used to be precisely inverted: `__time` had `flex: none` and `__title`
+ * did not, so the title was the one thing flexbox was free to crush — and it
+ * did, on every ghost of an hour or less. The board ended up asking you to
+ * accept an unnamed block. Now the time is what yields.
+ *
+ * Higher than `EventBlock`'s 40px because a ghost carries two buttons a real
+ * block doesn't; one hour (46px) has to land on the tight side of this.
+ */
+const TIGHT_BLOCK_PX = 56;
+
 export function GhostBlock({
   proposal,
   startMin,
@@ -75,9 +97,19 @@ export function GhostBlock({
   const top = yForMinutes(startMin);
   const height = Math.max(yForMinutes(endMin) - top, 20);
   const veryShort = height < SHORT_BLOCK_PX;
+  const tight = height < TIGHT_BLOCK_PX;
   // A `1/1` would be noise — only a real split earns the badge, same rule as
   // EventBlock's session marker.
   const linked = Boolean(proposal.sessions && proposal.sessions > 1);
+
+  // Spelled out for the tooltip and the accessible name in every case, even
+  // when the button itself is down to a single glyph.
+  const acceptLabel = linked
+    ? `Accept all ${proposal.sessions} sittings of this task`
+    : 'Accept this placement';
+  const dismissLabel = linked
+    ? `Dismiss all ${proposal.sessions} sittings of this task`
+    : 'Dismiss this placement';
 
   const conflictLabel = proposal.conflict
     ? `Overlaps ${proposal.conflict.kind === 'skeleton' ? 'the recurring block' : 'the event'} "${proposal.conflict.title}"`
@@ -87,7 +119,9 @@ export function GhostBlock({
 
   return (
     <div
-      className={`weekfit-ghost${dragging ? ' weekfit-ghost--dragging' : ''}${
+      className={`weekfit-ghost${tight ? ' weekfit-ghost--tight' : ''}${
+        veryShort ? ' weekfit-ghost--escape' : ''
+      }${dragging ? ' weekfit-ghost--dragging' : ''}${
         resizing ? ' weekfit-ghost--resizing' : ''
       }${proposal.conflict ? ' weekfit-ghost--conflict' : ''}`}
       style={{ top, height }}
@@ -115,9 +149,13 @@ export function GhostBlock({
           onResizeStart(proposal, 'bottom', e);
         }}
       />
-      <span className="weekfit-ghost__time">
-        {fmtMinutes(startMin)}–{fmtMinutes(endMin)}
-      </span>
+      {/* Dropped on a tight ghost — the grid position already says when, and
+          the block's own `title`/`aria-label` still spell it out in full. */}
+      {!tight && (
+        <span className="weekfit-ghost__time">
+          {fmtMinutes(startMin)}–{fmtMinutes(endMin)}
+        </span>
+      )}
       <span className="weekfit-ghost__title">{proposal.title}</span>
       {linked && (
         <span
@@ -132,36 +170,39 @@ export function GhostBlock({
           ⚠
         </span>
       )}
-      {/* On a ghost too short to hold them in flow, the actions are lifted
-          out of the block entirely (see `--escape` in styles.css). They were
+      {/* On a ghost too short to hold them in flow, the actions are pinned to
+          its right edge instead (see `--escape` in styles.css). They were
           previously clipped, which left a 30-minute proposal with no way to
-          accept or dismiss it at all. */}
+          accept or dismiss it at all.
+
+          There they shrink to a tick and a cross. Two words at that size take
+          most of a day column and squeeze the title out — which trades one
+          unusable ghost for an anonymous one. The accessible name and the
+          tooltip still say "Accept this placement" in full. */}
       <div className={`weekfit-ghost__actions${veryShort ? ' weekfit-ghost__actions--escape' : ''}`}>
         <button
           type="button"
           className="weekfit-ghost__accept"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => onAccept(proposal.groupKey)}
-          title={
-            linked
-              ? `Accept all ${proposal.sessions} sittings of this task`
-              : 'Accept this placement'
-          }
+          title={acceptLabel}
+          // Only when the word itself is gone. Setting it unconditionally
+          // would replace a perfectly good visible name ("Accept all 3") with
+          // a longer one, which is how this broke two existing tests — they
+          // were right and it was wrong.
+          aria-label={veryShort ? acceptLabel : undefined}
         >
-          {linked ? `Accept all ${proposal.sessions}` : 'Accept'}
+          {veryShort ? '✓' : linked ? `Accept all ${proposal.sessions}` : 'Accept'}
         </button>
         <button
           type="button"
           className="weekfit-ghost__dismiss"
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => onDismiss(proposal.groupKey)}
-          title={
-            linked
-              ? `Dismiss all ${proposal.sessions} sittings of this task`
-              : 'Dismiss this placement'
-          }
+          title={dismissLabel}
+          aria-label={veryShort ? dismissLabel : undefined}
         >
-          {linked ? `Dismiss all ${proposal.sessions}` : 'Dismiss'}
+          {veryShort ? '✕' : linked ? `Dismiss all ${proposal.sessions}` : 'Dismiss'}
         </button>
       </div>
     </div>

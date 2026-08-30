@@ -726,6 +726,18 @@
   border-color: var(--color-orange);
 }
 
+/* A ghost of an hour or less lays out as a row and drops the time entirely —
+   see `TIGHT_BLOCK_PX` in GhostBlock.tsx for why the time is the right thing
+   to lose. `EventBlock` has had the same treatment since Phase 1 (its
+   `--tight`); the ghost never got one, despite having two buttons more to
+   fit, and that is why every short proposal on the board was nameless. */
+.weekfit-ghost--tight {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 7px;
+}
+
 .weekfit-ghost__time {
   font-size: 0.68em;
   color: var(--text-accent);
@@ -739,6 +751,19 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* The title is the last thing to give way, not the first. Without these it
+     is the only flex item that can shrink, so on any cramped ghost it — and
+     nothing else — collapsed to nothing. `min-width: 0` is what lets it
+     ellipsise inside a row instead of forcing the buttons out of the block. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* Keep the actions at their natural width in a tight row; the title yields
+   around them, down to an ellipsis, rather than pushing them off the edge. */
+.weekfit-ghost--tight .weekfit-ghost__actions {
+  flex: none;
+  margin-top: 0;
 }
 
 .weekfit-ghost__ses {
@@ -1284,26 +1309,37 @@
 /* A ghost shorter than its own controls cannot contain them in flow — they
    get clipped, leaving a 30-minute proposal with no way to accept or dismiss
    it at all.
-   
+
    They are pinned to the ghost's own right edge instead, *inside its day
    column*. An earlier attempt overhung to the right (`left: 100%`) on the
    reasoning that it would only cover empty grid — it doesn't: it lands in the
    next day's column, where the buttons read as orphaned controls belonging to
-   nothing, and a screenshot of a busy week made that obvious immediately. The
-   title truncates to make room, which is the right thing to lose. */
+   nothing, and a screenshot of a busy week made that obvious immediately.
+
+   At that size they are a tick and a cross, not two words: "Accept" and
+   "Dismiss" together take most of a day column, and pinning them over the
+   only line of text there is left a 30-minute ghost showing two buttons and
+   no name. `--escape` reserves their width on the ghost so the title
+   ellipsises cleanly beside them instead of running underneath. */
+.weekfit-ghost--escape {
+  padding-right: 44px;
+}
+
 .weekfit-ghost__actions--escape {
   position: absolute;
   top: 1px;
-  right: 2px;
+  right: 3px;
   left: auto;
   margin-top: 0;
   z-index: 6;
-  gap: 2px;
+  gap: 3px;
   white-space: nowrap;
 }
 
 .weekfit-ghost__actions--escape button {
-  padding: 0 4px;
+  min-width: 17px;
+  padding: 0 3px;
   font-size: var(--font-ui-smaller, 0.7em);
-  line-height: 1.4;
+  line-height: 1.5;
+  text-align: center;
 }

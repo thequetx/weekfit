@@ -134,8 +134,11 @@ describe('a short ghost can still be accepted', () => {
     const actions = container.querySelector('.weekfit-ghost__actions');
     expect(actions).toBeTruthy();
     expect(actions!.classList.contains('weekfit-ghost__actions--escape')).toBe(true);
-    // And they are still real, clickable buttons.
-    expect(screen.getByRole('button', { name: /^accept$/i })).toBeInTheDocument();
+    // And they are still real, clickable buttons. At this size the visible
+    // label is a glyph — two words would take most of a day column and push
+    // the title out, trading an unusable ghost for an anonymous one — so the
+    // accessible name is what carries the meaning. See `ghostsize.test.tsx`.
+    expect(screen.getByRole('button', { name: 'Accept this placement' })).toBeInTheDocument();
   });
 
   it('a tall ghost keeps its actions in flow', () => {
