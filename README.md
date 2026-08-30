@@ -6,7 +6,12 @@ Weekfit takes the tasks you already have, the hours you're actually available, a
 things already in your week — and proposes where the work goes. You accept what you like,
 drag what you don't, and it writes plain text back into your notes.
 
-> ⚠️ **Screenshot goes here.** Not yet taken — see [Status](#status).
+<img width="1200" height="800" alt="1-fit-this-week" src="https://github.com/user-attachments/assets/17c3e0ea-bf5a-438f-b88a-2fa632b9ac69" />
+
+<img width="1200" height="800" alt="2-a-real-week" src="https://github.com/user-attachments/assets/9e0b3787-190b-4e66-8104-e9cf7c8f8a35" />
+
+<img width="1200" height="800" alt="3-first-run" src="https://github.com/user-attachments/assets/3f9f3b92-4402-46f2-9361-e9bb2e4916ae" />
+
 
 ---
 
