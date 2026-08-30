@@ -86,6 +86,7 @@ still sitting in your notes in a format three other tools understand.
 | **Replan** | Re-fits what didn't happen. The feature that makes this useful on a Wednesday |
 | **Weekly review** | Planned vs kept, plus frontmatter an Obsidian Bases table can read |
 | **Roll forward** | Carries unfinished work into next week, keeping every annotation. Leaves anything still scheduled later in the week where it is |
+| **Deadlines first** | Slots are offered in due-date order, then by priority — note order only breaks a tie |
 | **Balanced or soonest-first** | Spread work across the week, or fill the earliest day first |
 | **Act from the rail** | Drag a task onto the week, tick it done, open its line, or right-click for all three |
 | **Drag back to the rail** | Takes a block off the week again |
@@ -153,7 +154,7 @@ keep in sync. You can override it.
 
 **Not yet released.** The planning engine, the vault adapter, the week view, fitting and
 its write path, splitting, replan, review, backlog and capture are all built and in daily
-use by the author. **835 tests**, including component tests and an end-to-end pass that
+use by the author. **854 tests**, including component tests and an end-to-end pass that
 runs the real read → fit → write pipeline against real files on disk and asserts the
 resulting bytes.
 

@@ -346,3 +346,98 @@ describe('computeReplan — what did not happen, re-fitted', () => {
     expect(fit.proposals).toEqual([]);
   });
 });
+
+/**
+ * The reported case, end to end: `Write newsletter [due:: 2026-09-03]` was
+ * proposed for Friday 4 Sep while Thursday sat free, because it happened to
+ * be written below a task that took the slot first. Placement order was file
+ * order and nothing anywhere read a due date.
+ */
+describe('computeFit honours deadlines', () => {
+  // One 90-minute slot per weekday: whoever is asked first takes Monday, and
+  // so on. That makes the order of the list directly visible in the output.
+  const ONE_SLOT_A_DAY = settings({
+    windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 10 * 60 + 30)],
+    fitStrategy: 'earliest',
+  });
+
+  function dayOf(fit: ReturnType<typeof computeFit>, title: string): number | undefined {
+    return fit.proposals.find((p) => p.title.startsWith(title))?.day;
+  }
+
+  it('gives the earlier deadline the earlier day, whatever order the note is in', () => {
+    const snap = snapshot({
+      tasks: [
+        task('Written first [due:: 2026-09-04] ~90m', { line: 1 }),
+        task('Due sooner [due:: 2026-09-02] ~90m', { line: 2 }),
+      ],
+    });
+
+    const fit = computeFit(snap, ONE_SLOT_A_DAY, NOW);
+
+    expect(dayOf(fit, 'Due sooner')).toBe(0);
+    expect(dayOf(fit, 'Written first')).toBe(1);
+  });
+
+  it('does not let a loud priority jump a nearer deadline', () => {
+    const snap = snapshot({
+      tasks: [
+        task('Shouty 🔺 [due:: 2026-12-25] ~90m', { line: 1 }),
+        task('Quiet [due:: 2026-09-02] ~90m', { line: 2 }),
+      ],
+    });
+
+    expect(dayOf(computeFit(snap, ONE_SLOT_A_DAY, NOW), 'Quiet')).toBe(0);
+  });
+
+  it('still uses priority to separate tasks due on the same day', () => {
+    const snap = snapshot({
+      tasks: [
+        task('Low 🔽 [due:: 2026-09-04] ~90m', { line: 1 }),
+        task('High ⏫ [due:: 2026-09-04] ~90m', { line: 2 }),
+      ],
+    });
+
+    const fit = computeFit(snap, ONE_SLOT_A_DAY, NOW);
+    expect(dayOf(fit, 'High')).toBe(0);
+    expect(dayOf(fit, 'Low')).toBe(1);
+  });
+
+  // Both strategies read the same ordered list — the balanced one is the
+  // default, so a fix that only reached `earliest` would have fixed nothing
+  // for almost every user.
+  it('applies to the balanced strategy too, not just soonest-first', () => {
+    const snap = snapshot({
+      tasks: [
+        task('Written first [due:: 2026-09-04] ~90m', { line: 1 }),
+        task('Due sooner [due:: 2026-09-02] ~90m', { line: 2 }),
+      ],
+    });
+    const spread = settings({
+      windows: [win('work', [0, 1, 2, 3, 4], 9 * 60, 10 * 60 + 30)],
+      fitStrategy: 'spread',
+    });
+
+    const fit = computeFit(snap, spread, NOW);
+    const sooner = dayOf(fit, 'Due sooner');
+    const later = dayOf(fit, 'Written first');
+    expect(sooner).not.toBeUndefined();
+    expect(later).not.toBeUndefined();
+    expect(sooner!).toBeLessThan(later!);
+  });
+
+  it('leaves an all-undated week in the order the author wrote it', () => {
+    const snap = snapshot({
+      tasks: [
+        task('One ~90m', { line: 1 }),
+        task('Two ~90m', { line: 2 }),
+        task('Three ~90m', { line: 3 }),
+      ],
+    });
+
+    const fit = computeFit(snap, ONE_SLOT_A_DAY, NOW);
+    expect(dayOf(fit, 'One')).toBe(0);
+    expect(dayOf(fit, 'Two')).toBe(1);
+    expect(dayOf(fit, 'Three')).toBe(2);
+  });
+});

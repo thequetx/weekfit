@@ -18,6 +18,7 @@ import type { Gap } from '../lib/gaps';
 import type { CalEvent } from '../lib/types';
 import { applyPlacement, hasPlacement } from './dayplanner';
 import { isRailTask } from './sessions';
+import { orderByFit, orderForFit } from './fitorder';
 import type { VaultTask } from '../lib/types';
 import type { Capacity, FitState, WeekfitSettings, WeekSnapshot } from './contract';
 
@@ -51,7 +52,10 @@ export function computeFit(
     { now },
   );
 
-  const unscheduled = unscheduledTasks(snapshot);
+  // Ordered before either strategy sees it: both take the best remaining gap
+  // for each task in turn, so this list *is* the priority order. Sorting the
+  // input rather than the engine keeps `lib/` untouched.
+  const unscheduled = orderForFit(unscheduledTasks(snapshot));
 
   const { proposals, unplaced } =
     settings.fitStrategy === 'earliest'
@@ -129,7 +133,14 @@ export function computeReplan(
 
   const passed = passedBlocks(snapshot.weekStart, snapshot.scheduled, matchable, { now });
 
-  const { proposals: raw, unplaced } = replanFit(passed, gaps, settings.durations);
+  // Same deadline-first order as "Fit this week" — `replanFit` places from an
+  // insertion-ordered Map, so this list is its priority order too. A due date
+  // that mattered when the work was first planned still matters now.
+  const { proposals: raw, unplaced } = replanFit(
+    orderByFit(passed, (b) => b.task.text),
+    gaps,
+    settings.durations,
+  );
 
   const realText = new Map(snapshot.scheduledLines.map((t) => [`${t.file}:${t.line}`, t.text]));
   const proposals = raw.map((p) => {
