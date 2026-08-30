@@ -123,6 +123,8 @@ function renderRoot(overrides: Partial<WeekViewRootProps> = {}) {
     onMoveProposal: noop,
     onToggleGaps: noop,
     onCreateWeekNote: noop,
+    onReplan: noop,
+    onReview: noop,
     onMoveBlock: noop,
     onUnschedule: noop,
     onOpenSource: noop,
@@ -190,6 +192,29 @@ describe('WeekViewRoot — empty / error states', () => {
   });
 });
 
+describe('WeekViewRoot — replan and review are reachable from the board', () => {
+  // Both used to exist only as commands. A weekly ritual you have to already
+  // know about in order to search for it is not discoverable.
+  it('the Replan button asks the plugin to replan', () => {
+    const onReplan = vi.fn();
+    renderRoot({ onReplan });
+    fireEvent.click(screen.getByRole('button', { name: /replan/i }));
+    expect(onReplan).toHaveBeenCalledTimes(1);
+  });
+
+  it('the Review button opens the review, which is where roll-forward lives', () => {
+    const onReview = vi.fn();
+    renderRoot({ onReview });
+    fireEvent.click(screen.getByRole('button', { name: /review week/i }));
+    expect(onReview).toHaveBeenCalledTimes(1);
+  });
+
+  it('both are present before any fit has run', () => {
+    renderRoot({ fit: null });
+    expect(screen.getByRole('button', { name: /replan/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /review week/i })).toBeInTheDocument();
+  });
+});
 describe('WeekViewRoot — scheduled events', () => {
   it('positions a scheduled event in its own day column', () => {
     const wednesday = addDays(WEEK_START, 2);

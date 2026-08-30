@@ -45,6 +45,10 @@ export interface WeekViewRootProps {
   onToggleGaps: () => void;
   /** Seed the week’s note from the empty state. */
   onCreateWeekNote: () => void;
+  /** Re-fit blocks that passed with their task still open. */
+  onReplan: () => void;
+  /** Open the weekly review, where roll-forward lives. */
+  onReview: () => void;
   // --- Phase 2C: manipulating a block already on the grid ------------------
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
@@ -102,6 +106,8 @@ export function WeekViewRoot({
   onMoveProposal,
   onToggleGaps,
   onCreateWeekNote,
+  onReplan,
+  onReview,
   onMoveBlock,
   onUnschedule,
   onOpenSource,
@@ -189,6 +195,16 @@ export function WeekViewRoot({
               </button>
             </>
           )}
+          {/* Replan and review were reachable only from the command palette,
+              which is no way to surface a weekly ritual — you have to already
+              know it exists to search for it. Both are one press from the
+              board now. */}
+          <button type="button" className="weekfit-fitbar__replan" onClick={onReplan}>
+            Replan passed
+          </button>
+          <button type="button" className="weekfit-fitbar__review" onClick={onReview}>
+            Review week&hellip;
+          </button>
           <label className="weekfit-fitbar__gaps">
             <input type="checkbox" checked={settings.showGaps} onChange={onToggleGaps} />
             Show gap candidates

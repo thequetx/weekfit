@@ -1094,3 +1094,23 @@
   background: var(--background-primary-alt);
   color: var(--text-normal);
 }
+
+/* Replan and Review, beside "Fit this week" — secondary to it, but visible.
+   Both were command-palette-only, which is no way to surface a weekly ritual:
+   you have to already know it exists to go looking for it. */
+.weekfit-fitbar__replan,
+.weekfit-fitbar__review {
+  cursor: pointer;
+  padding: var(--size-4-2) calc(var(--size-4-2) * 1.5);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+}
+
+.weekfit-fitbar__replan:hover,
+.weekfit-fitbar__review:hover {
+  background: var(--background-modifier-hover);
+}

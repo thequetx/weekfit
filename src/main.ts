@@ -618,6 +618,8 @@ export default class WeekfitPlugin extends Plugin {
             this.moveProposal(groupKey, day, startMin),
           onToggleGaps: () => void this.toggleGaps(),
           onCreateWeekNote: () => void this.createWeekNote(),
+          onReplan: () => void this.runReplan(),
+          onReview: () => void this.openReview(),
           onPrevWeek: () => void this.goToWeek(addWeeks(this.weekStart, -1)),
           onNextWeek: () => void this.goToWeek(addWeeks(this.weekStart, 1)),
           onToday: () => void this.goToWeek(new Date()),

@@ -37,6 +37,8 @@ export interface WeekViewState {
   onMoveProposal: (groupKey: string, day: number, startMin: number) => void;
   onToggleGaps: () => void;
   onCreateWeekNote: () => void;
+  onReplan: () => void;
+  onReview: () => void;
   // --- Phase 2C: manipulating a block already on the grid ------------------
   onMoveBlock: (uid: string, day: number, startMin: number) => void;
   onUnschedule: (uid: string) => void;
@@ -72,6 +74,8 @@ const INITIAL_STATE: WeekViewState = {
   onMoveProposal: noop,
   onToggleGaps: noop,
   onCreateWeekNote: noop,
+  onReplan: noop,
+  onReview: noop,
   onMoveBlock: noop,
   onUnschedule: noop,
   onOpenSource: noop,
