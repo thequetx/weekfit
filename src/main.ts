@@ -712,23 +712,31 @@ export default class WeekfitPlugin extends Plugin {
     // right-click is where a lot of people look first, and a control that
     // exists only on a chip you have to notice is a control half the users
     // never find.
+    //
+    // Deferred a tick. Obsidian closes an open menu from a document-level
+    // handler, and a second menu built synchronously inside the first one's
+    // click is created while that same click is still propagating — so what
+    // dismisses the outer menu can dismiss the inner one with it, and the
+    // item reads as doing nothing. `setSubmenu` would be the proper answer;
+    // it is not in the typings this builds against.
+    const nested = (open: () => void) => window.setTimeout(open, 0);
     menu.addItem((i) =>
       i
         .setTitle('Due date…')
         .setIcon('calendar')
-        .onClick(() => this.dueMenu(file, line, text, x, y)),
+        .onClick(() => nested(() => this.dueMenu(file, line, text, x, y))),
     );
     menu.addItem((i) =>
       i
         .setTitle('Duration…')
         .setIcon('clock')
-        .onClick(() => this.estimateMenu(file, line, text, x, y)),
+        .onClick(() => nested(() => this.estimateMenu(file, line, text, x, y))),
     );
     menu.addItem((i) =>
       i
         .setTitle('Priority…')
         .setIcon('signal')
-        .onClick(() => this.priorityMenu(file, line, text, x, y)),
+        .onClick(() => nested(() => this.priorityMenu(file, line, text, x, y))),
     );
     menu.addSeparator();
     menu.addItem((i) =>
