@@ -52,21 +52,36 @@ The tag is `0.1.0` — **no `v` prefix**. Obsidian matches the tag against
 
 ## 3. Submit to the directory
 
-Fork `obsidianmd/obsidian-releases`, add one entry to the **end** of
-`community-plugins.json`:
+**This is a web form now, not a pull request.** An earlier version of this
+document said to fork `obsidianmd/obsidian-releases` and add an entry to
+`community-plugins.json`. That was the process for years and it is no longer
+open: pull requests *and* issues are both disabled on that repository, so the
+attempt fails with a permissions error that reads like a problem with your
+account. It isn't — an unauthenticated request gets the same 404, while other
+`obsidianmd` repos answer normally. That file is still the directory's data
+store; it just isn't edited by hand any more.
 
-```json
-{
-  "id": "weekfit",
-  "name": "Weekfit",
-  "author": "Tyler Williams",
-  "description": "Press one button and see where the week's work fits. Schedules your unscheduled tasks into the gaps between your commitments.",
-  "repo": "<your-github-username>/weekfit"
-}
-```
+The current process, per
+<https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>:
 
-Open a PR and fill in their template honestly. Expect review latency measured
-in weeks, and expect a reviewer to comment — that is normal, not a rejection.
+1. Go to <https://community.obsidian.md> and sign in with your **Obsidian**
+   account.
+2. Link your **GitHub** account to your profile. This is how the directory
+   proves you own the repo you are submitting.
+3. Add the plugin through the directory's own form.
+
+The directory reads `manifest.json` **at the HEAD of the repo's default
+branch**, and requires a published release whose tag matches that manifest's
+`version` exactly, carrying `main.js`, `manifest.json` and (optionally)
+`styles.css`. Steps 1 and 2 above already satisfy all of that — nothing needs
+re-doing at submission time.
+
+Expect review latency measured in weeks, and expect a reviewer to comment.
+That is normal, not a rejection.
+
+> Check this section against the docs before every submission. The process
+> changed once with no redirect and no error message that named the real
+> cause; assume it can change again.
 
 ## 4. Known things a reviewer may raise
 
