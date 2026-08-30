@@ -56,7 +56,7 @@ export function collectBacklog(
     .map((t) => ({
       task: t,
       meta: parseTaskMeta(t.text),
-      est: resolveTaskDuration(t.text, settings.durations as DurationMap),
+      est: resolveTaskDuration(t.text, settings.durations),
     }))
     .sort((a, b) => compareMeta(a.meta, b.meta));
 }

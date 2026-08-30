@@ -805,7 +805,7 @@ export function WeekGrid({
   // has no way to reach into this component's drag machine.
   useEffect(() => {
     if (incoming && dragKind === null) beginIncoming();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on `incoming` alone on purpose. `dragKind` and `beginIncoming` both change while a drag is running, and re-running this then would restart the very gesture the user is mid-way through.
   }, [incoming]);
 
   useEffect(() => {
@@ -864,7 +864,7 @@ export function WeekGrid({
     // synchronously at pointerdown, before `dragKind` ever flips) and props
     // read fresh at the moment the drag started, which is the behaviour the
     // 4px-threshold click/drag distinction already assumes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see the comment directly above: `dragKind` is the only dependency that may re-bind these window listeners. Re-binding on any other change would detach the listeners a live drag depends on.
   }, [dragKind]);
 
   return (

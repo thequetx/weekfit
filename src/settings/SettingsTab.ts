@@ -81,11 +81,14 @@ function fmtHHMM(min: number): string {
  *  keystroke that fails validation doesn't force a full `display()` re-render
  *  (which would drop focus out of the field being typed into). */
 function errorSlot(parent: HTMLElement): (msg: string | null) => void {
-  const el = parent.createDiv({ cls: 'weekfit-settings-error' });
-  el.style.display = 'none';
+  // Hidden by class rather than an inline `style.display`. A theme can
+  // override a class; it cannot override an inline style without
+  // `!important`, and this plugin's whole visual contract is that the theme
+  // wins.
+  const el = parent.createDiv({ cls: 'weekfit-settings-error weekfit-is-hidden' });
   return (msg: string | null) => {
     el.setText(msg ?? '');
-    el.style.display = msg ? '' : 'none';
+    el.toggleClass('weekfit-is-hidden', !msg);
   };
 }
 
@@ -120,7 +123,7 @@ export class SettingsTab extends PluginSettingTab {
     // the way permanently once there is.
     if (settings.windows.length === 0) {
       new Setting(containerEl).setName('Getting started').setHeading();
-      const intro = containerEl.createEl('div', { cls: 'setting-item-description' });
+      const intro = containerEl.createDiv({ cls: 'setting-item-description' });
       intro.createEl('p', {
         text:
           'Weekfit needs to know when work could happen before it can fit anything. ' +

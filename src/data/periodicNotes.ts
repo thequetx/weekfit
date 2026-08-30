@@ -14,6 +14,49 @@
 import type { App } from 'obsidian';
 import type { WeekfitSettings } from './contract';
 
+// --- the shapes we read out of two other plugins ---------------------------
+//
+// Written out rather than reached for through `any`. The values are still
+// untrusted — every field stays optional and every read stays guarded — but
+// describing the shape makes a mistyped property a compile error instead of
+// `undefined` at runtime, and it settles the unsafe-`any` lint rules for the
+// right reason rather than by suppressing them.
+
+/** One period's configuration inside Periodic Notes' settings. */
+interface PeriodicSection {
+  enabled?: boolean;
+  folder?: string;
+  format?: string;
+}
+
+interface PeriodicNotesPlugin {
+  settings?: {
+    weekly?: PeriodicSection;
+    daily?: PeriodicSection;
+  };
+}
+
+interface DailyNotesPlugin {
+  instance?: {
+    options?: {
+      folder?: string;
+      format?: string;
+    };
+  };
+}
+
+/**
+ * `App` offers no typed route to another plugin's settings, because reaching
+ * for one is explicitly outside the public API. This names that access once,
+ * so the rest of the file reads normally — and so a reviewer has a single
+ * place to look for everything here that Obsidian does not promise to keep
+ * stable.
+ */
+interface PluginHost {
+  plugins?: { getPlugin?: (id: string) => unknown };
+  internalPlugins?: { getPluginById?: (id: string) => unknown };
+}
+
 export interface NoteLocationSpec {
   folder: string;
   format: string; // a moment format string, e.g. 'YYYY-[W]WW'
@@ -61,7 +104,10 @@ export function resolveNoteLocations(app: App, settings: WeekfitSettings): NoteL
 
   if (settings.usePeriodicNotes) {
     try {
-      const periodicNotes = (app as any)?.plugins?.getPlugin?.('periodic-notes');
+      const host = app as unknown as PluginHost;
+      const periodicNotes = host.plugins?.getPlugin?.('periodic-notes') as
+        | PeriodicNotesPlugin
+        | undefined;
       const pnSettings = periodicNotes?.settings;
 
       const w = pnSettings?.weekly;
@@ -89,7 +135,10 @@ export function resolveNoteLocations(app: App, settings: WeekfitSettings): NoteL
 
   if (!daily) {
     try {
-      const dailyNotes = (app as any)?.internalPlugins?.getPluginById?.('daily-notes');
+      const host = app as unknown as PluginHost;
+      const dailyNotes = host.internalPlugins?.getPluginById?.('daily-notes') as
+        | DailyNotesPlugin
+        | undefined;
       const opts = dailyNotes?.instance?.options;
       if (opts && (opts.format || opts.folder)) {
         daily = {

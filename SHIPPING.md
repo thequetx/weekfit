@@ -83,20 +83,43 @@ That is normal, not a rejection.
 > changed once with no redirect and no error message that named the real
 > cause; assume it can change again.
 
-## 4. Known things a reviewer may raise
+## 4. The automated checks
+
+Submitting runs a linter over the source and reports Errors, Warnings and
+Recommendations. **Errors fail the submission.** The first attempt failed on a
+list of findings that had never been looked for, because this project has no
+linter of its own — so read that report carefully; it is currently the only
+place these rules get run.
+
+**You cannot reproduce it locally yet, and it is worth knowing why** rather
+than rediscovering it: the check is `eslint` + `eslint-plugin-obsidianmd`,
+which depends on `typescript-eslint`, which **refuses to load against
+TypeScript 7** ("typescript-eslint does not support TS 7.0"). This project is
+on TS 7.0.2. Dropping to TS 6 makes `eslint` run but breaks
+`@testing-library/react`'s type exports in the test files, so `npm run build`
+fails instead — a worse trade. Revisit when typescript-eslint ships TS 7
+support (typescript-eslint#10940).
+
+If you do try again: install with plain `npm install`, never
+`--legacy-peer-deps`. The latter un-hoists `@testing-library/dom` and every
+component test stops type-checking, which looks like a TypeScript problem and
+is not one. `git checkout package.json package-lock.json && npm ci` puts it
+back.
+
+## 5. Known things a reviewer may raise
 
 Better to have answers ready than to be surprised:
 
-- **Two `as any` casts** in `src/data/periodicNotes.ts`, reaching into the
-  Periodic Notes and core Daily Notes plugins to read their settings. There is
-  no typed API for that; both are wrapped in optional chaining and try/catch.
 - **`src/lib/` is vendored** — a byte-for-byte port of an engine from another
   project of yours, checked against its source on every commit. Say so if
   asked; it is your own code, not a bundled dependency.
 - **`isDesktopOnly: true`** because touch is untested, not because anything
   needs Node or Electron. Easy to loosen later.
+- **Settings do not implement `getSettingDefinitions()`**, the declarative
+  API added in 1.13.0, so they will not appear in Obsidian's settings search.
+  A warning, not an error; adopting it is a full rewrite of `SettingsTab`.
 
-## 5. After it lands
+## 6. After it lands
 
 - The listing is your one shot at the pitch. The first line people read is the
   `description` in `manifest.json` and the directory entry — they must match.

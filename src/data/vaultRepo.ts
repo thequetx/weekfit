@@ -169,10 +169,10 @@ export class VaultRepo {
    * four of its nineteen bugs).
    */
   onChange(cb: () => void): () => void {
-    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timer: number | null = null;
     const trigger = () => {
-      if (timer != null) clearTimeout(timer);
-      timer = setTimeout(() => {
+      if (timer != null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
         timer = null;
         cb();
       }, DEBOUNCE_MS);
@@ -187,7 +187,7 @@ export class VaultRepo {
     ];
 
     return () => {
-      if (timer != null) clearTimeout(timer);
+      if (timer != null) window.clearTimeout(timer);
       for (const ref of refs) this.app.vault.offref(ref);
     };
   }

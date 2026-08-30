@@ -20,6 +20,13 @@ vi.mock('obsidian', async () => {
   return { moment, TFile };
 });
 
+// `VaultRepo` debounces with `window.setTimeout` rather than the bare global.
+// Obsidian asks for that so a timer belongs to whichever popout window the
+// view is actually in, and dies with it. Node has no `window`, but its timers
+// are the very same functions — so pointing `window` at `globalThis` is a
+// faithful stand-in, not a fake that could hide a real difference.
+vi.stubGlobal('window', globalThis);
+
 const { VaultRepo } = await import('../src/data/vaultRepo');
 const { TFile } = (await import('obsidian')) as unknown as { TFile: new (path: string) => any };
 const { DEFAULT_SETTINGS } = await import('../src/data/contract');

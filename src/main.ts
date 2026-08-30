@@ -145,7 +145,7 @@ export default class WeekfitPlugin extends Plugin {
     });
     this.addCommand({
       id: 'undo-last',
-      name: 'Undo last Weekfit change',
+      name: 'Undo last change',
       callback: () => void this.undoLast(),
     });
     this.addCommand({
@@ -414,7 +414,7 @@ export default class WeekfitPlugin extends Plugin {
       leaf = workspace.getLeaf('tab');
       await leaf.setViewState({ type: VIEW_TYPE_BACKLOG, active: true });
     }
-    workspace.revealLeaf(leaf);
+    await workspace.revealLeaf(leaf);
     await this.refreshBacklog();
   }
 
@@ -1099,7 +1099,7 @@ export default class WeekfitPlugin extends Plugin {
       leaf = workspace.getLeaf('tab');
       await leaf.setViewState({ type: VIEW_TYPE_WEEK, active: true });
     }
-    workspace.revealLeaf(leaf);
+    await workspace.revealLeaf(leaf);
     await this.refresh();
   }
 }

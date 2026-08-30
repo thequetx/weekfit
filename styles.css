@@ -10,6 +10,12 @@
  * Obsidian variable (`color-mix()` blends a variable toward transparent
  * rather than picking a fixed rgba() base).
  *
+ * Each `color-mix()` used to be preceded by a plain-variable fallback for
+ * engines without it. Those are gone: `minAppVersion` is 1.7.2, every
+ * Obsidian build from there ships a Chromium well past `color-mix` support
+ * (Chromium 111), and a duplicate declaration that can never be the one used
+ * is just a second thing to keep in step with the first.
+ *
  * Every selector is prefixed `.weekfit-` (state modifiers too, e.g.
  * `.weekfit-grid__col--today` rather than a bare `.is-today`) so nothing here
  * can leak into the rest of the app — a community plugin's stylesheet is
@@ -142,9 +148,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--size-4-2);
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--color-red) 12%, var(--background-primary));
-  border: 1px solid var(--color-red); /* fallback: no color-mix */
   border: 1px solid color-mix(in srgb, var(--color-red) 35%, transparent);
 }
 
@@ -228,7 +232,6 @@
    fixed blue — `--interactive-accent` already flips sensibly in both
    themes. */
 .weekfit-grid__col--today {
-  background: var(--background-primary-alt); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--interactive-accent) 6%, transparent);
 }
 
@@ -259,7 +262,6 @@
 /* Today's tint lives on the column, which the opaque header would cover —
    so the header carries it too, keeping the column readable top to bottom. */
 .weekfit-grid__col--today .weekfit-grid__colhead {
-  background: var(--background-primary-alt); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
 }
 
@@ -307,7 +309,6 @@
 }
 
 .weekfit-grid__line--half {
-  border-top-color: var(--background-modifier-border); /* fallback: no color-mix */
   border-top-color: color-mix(in srgb, var(--background-modifier-border) 45%, transparent);
 }
 
@@ -319,7 +320,6 @@
   left: 2px;
   right: 2px;
   border-left: 3px solid var(--text-faint);
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--text-muted) 10%, transparent);
   color: var(--text-muted);
   font-size: 0.65em;
@@ -377,9 +377,7 @@
    never competes with `.weekfit-ev`'s own accent `border-left` or
    `.weekfit-ev--dragging`'s drop shadow when both apply at once. */
 .weekfit-ev--conflict {
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--color-red) 10%, var(--background-secondary));
-  outline: 1px solid var(--color-red); /* fallback: no color-mix */
   outline: 1px solid color-mix(in srgb, var(--color-red) 45%, transparent);
   outline-offset: -1px;
 }
@@ -411,7 +409,6 @@
      width of the block's own bottom edge and would otherwise sit on top of
      this button's overlapping corner and swallow its clicks. */
   z-index: 4;
-  background: var(--background-primary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--background-primary) 70%, var(--background-secondary));
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s);
@@ -774,7 +771,6 @@
   right: 2px;
   border: 1px dashed var(--text-faint);
   border-radius: var(--radius-s);
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--text-faint) 6%, transparent);
   pointer-events: none;
   z-index: 0;
@@ -788,7 +784,6 @@
   right: 4px;
   border: 1px dashed var(--interactive-accent);
   border-radius: var(--radius-s);
-  background: var(--background-primary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
   padding: 3px 7px;
   overflow: hidden;
@@ -965,7 +960,6 @@
 }
 
 .weekfit-resize:hover {
-  background: var(--interactive-accent); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--interactive-accent) 50%, transparent);
 }
 
@@ -1041,9 +1035,7 @@
 /* A refused write is a warning, not a hard error — amber rather than the
    crimson already spoken for by "now" and "over budget". */
 .weekfit-notice--warning {
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--color-orange) 12%, var(--background-primary));
-  border: 1px solid var(--color-orange); /* fallback: no color-mix */
   border: 1px solid color-mix(in srgb, var(--color-orange) 35%, transparent);
 }
 
@@ -1058,6 +1050,12 @@
   color: var(--color-red);
   font-size: 0.8em;
   margin-top: 2px;
+}
+
+/* Toggled from TypeScript in place of an inline `style.display`, so a theme
+   can still have an opinion about the element. */
+.weekfit-is-hidden {
+  display: none;
 }
 
 /* ---------- Backlog view: unscheduled work, out of the rail's way ---------- */
@@ -1115,7 +1113,6 @@
 }
 
 .weekfit-backlog__item:hover {
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--background-secondary) 70%, var(--interactive-accent));
 }
 
@@ -1216,7 +1213,6 @@
   padding: var(--size-4-2);
   border: 1px dashed var(--background-modifier-border);
   border-radius: var(--radius-m);
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
 }
 
@@ -1359,7 +1355,6 @@
   white-space: nowrap;
   padding: 0 4px;
   border-radius: var(--radius-s);
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--text-faint) 12%, transparent);
   color: var(--text-faint);
   font-size: var(--font-ui-smaller, 0.75em);
@@ -1376,7 +1371,6 @@
   pointer-events: none;
   border: 1px dashed var(--interactive-accent);
   border-radius: var(--radius-s);
-  background: var(--background-secondary); /* fallback: no color-mix */
   background: color-mix(in srgb, var(--interactive-accent) 18%, transparent);
   color: var(--text-normal);
   font-size: var(--font-ui-small);

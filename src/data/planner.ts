@@ -16,7 +16,7 @@ import { passedBlocks, replanFit } from '../lib/replan';
 import { gapWindowNames } from '../lib/gaps';
 import type { Gap } from '../lib/gaps';
 import type { CalEvent } from '../lib/types';
-import { applyPlacement, hasPlacement } from './dayplanner';
+import { applyPlacement } from './dayplanner';
 import { isRailTask } from './sessions';
 import { orderByFit, orderForFit } from './fitorder';
 import type { VaultTask } from '../lib/types';
