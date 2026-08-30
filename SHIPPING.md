@@ -26,11 +26,21 @@ Obsidian's submission checklist wants the repo public, MIT-licensed (it is,
 ## 2. Tag and release
 
 The release must contain **`main.js`, `manifest.json`, `styles.css` as loose
-files** — not a zip, not a folder. They are built and staged in `release/`.
+files** — not a zip, not a folder.
+
+`npm run release` type-checks, builds, and stages those three into `release/`,
+which is where the upload command below reads them from. **Always run it**,
+even when you think you just built. `release/` once sat four hours behind the
+working tree, and nothing about `gh release create` would have looked wrong —
+the artifacts are opaque, so a stale upload ships silently and the version
+number still says 0.1.0. The script also refuses to stage a `main.js` older
+than anything in `src/`, so the "forgot to rebuild" half of that mistake
+can't happen either.
 
 ```bash
 cd C:/Users/tyler/weekfit
-npm run build
+npm test
+npm run release
 git tag -a 0.1.0 -m "Weekfit 0.1.0"
 git push origin 0.1.0
 gh release create 0.1.0 release/main.js release/manifest.json release/styles.css \
