@@ -90,6 +90,7 @@ still sitting in your notes in a format three other tools understand.
 | **Act from the rail** | Drag a task onto the week, tick it done, open its line, or right-click for all three |
 | **Drag back to the rail** | Takes a block off the week again |
 | **Backlog + capture** | Somewhere for later, and a one-line way to get things there |
+| **Undo** | Puts back the last change, across every file it touched |
 
 ## How your notes are treated
 
@@ -105,6 +106,8 @@ This is the part worth trusting before you install anything that writes to your 
 - **Nothing proprietary is written.** A time range and a scheduled date, both standard
   Tasks syntax, in whichever flavour the line already uses.
 - **`Create this week's note` refuses to overwrite.** It is a seed, never a reset.
+- **Undo is a lifeline, not a guarantee.** It restores what Weekfit wrote, and steps
+  aside the moment you've edited the file yourself.
 - **Recurring tasks are left alone.** A `🔁` line belongs to the Tasks plugin; Weekfit
   never moves or rewrites one.
 
@@ -121,6 +124,7 @@ This is the part worth trusting before you install anything that writes to your 
 | `Create this week's note` | Seeds the note with the three sections |
 | `Previous week` / `Next week` / `Go to this week` | Navigation |
 | `Toggle gap candidates` | Shows the free slots the engine can see |
+| `Undo last Weekfit change` | Puts back the last thing Weekfit wrote |
 | `Refresh week` | Re-reads the vault |
 
 No hotkeys are claimed — bind your own in Settings → Hotkeys.
@@ -149,7 +153,7 @@ keep in sync. You can override it.
 
 **Not yet released.** The planning engine, the vault adapter, the week view, fitting and
 its write path, splitting, replan, review, backlog and capture are all built and in daily
-use by the author. **776 tests**, including component tests and an end-to-end pass that
+use by the author. **787 tests**, including component tests and an end-to-end pass that
 runs the real read → fit → write pipeline against real files on disk and asserts the
 resulting bytes.
 
@@ -157,9 +161,11 @@ resulting bytes.
 nothing has been tested on a phone or tablet, so the manifest says so rather than
 claiming support that hasn't been earned.
 
-⚠️ **There is no undo.** Every accept, drag, resize, tick and roll-forward writes to your
-notes immediately. Obsidian's own undo works inside a file you have open, but roll-forward
-touches two files at once. Try it on a scratch vault first.
+**There is an undo.** `Weekfit: Undo last Weekfit change` puts back the last thing it
+did — including a roll-forward that moved tasks between two notes, which Obsidian's own
+per-file undo can't reach. It refuses rather than clobbers: if you edited a note after
+Weekfit wrote it, that file is left exactly as it is and you're told which. It lasts for
+the session, so a reload clears it.
 
 ## Development
 

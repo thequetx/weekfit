@@ -9,6 +9,8 @@ import { collectBacklog } from './data/backlog';
 import { computeReview, rollForward, writeReview } from './data/review';
 import { ReviewModal } from './views/ReviewModal';
 import { weeklyNoteTemplate } from './data/template';
+import { beginJournal, endJournal } from './data/journal';
+import { UndoStack } from './data/undo';
 import { maxSittingsFor, planSplit, planSplitAuto } from './data/split';
 import type { SplitPlan, SplitTarget } from './data/split';
 import {
@@ -57,6 +59,8 @@ export default class WeekfitPlugin extends Plugin {
    * being asked again.
    */
   private dismissed = new Set<string>();
+  /** Session-only lifeline — see src/data/undo.ts for why it is not persisted. */
+  private undoStack = new UndoStack();
 
   /** Monday of the week being shown. Not necessarily the current one — the
    *  main reason to open a planner is to plan the week that hasn't happened
@@ -133,6 +137,11 @@ export default class WeekfitPlugin extends Plugin {
       id: 'weekly-review',
       name: 'Review this week',
       callback: () => void this.openReview(),
+    });
+    this.addCommand({
+      id: 'undo-last',
+      name: 'Undo last Weekfit change',
+      callback: () => void this.undoLast(),
     });
     this.addCommand({
       id: 'create-week-note',
@@ -290,6 +299,7 @@ export default class WeekfitPlugin extends Plugin {
     const weekStart = this.snapshot.weekStart;
     const locations = resolveNoteLocations(this.app, this.settings);
 
+    beginJournal();
     const result = await acceptProposals(this.app, chosen, {
       weekStart,
       // A line living in the daily note for its own day needs no scheduled
@@ -300,6 +310,10 @@ export default class WeekfitPlugin extends Plugin {
         notePathFor(addDays(weekStart, day), locations.daily.folder, locations.daily.format),
     });
 
+    this.undoStack.push(
+      chosen.length === 1 ? 'Accept a placement' : `Accept ${chosen.length} placements`,
+      endJournal(),
+    );
     this.lastWrite = result;
 
     // Accepted ghosts stop being ghosts. Dropping only what was actually
@@ -375,8 +389,16 @@ export default class WeekfitPlugin extends Plugin {
   private openCapture(): void {
     new CaptureModal(this.app, {
       getTargetPath: () => this.weekNotePath(),
-      write: (path, line) =>
-        appendUnderHeading(this.app, [{ file: path, heading: 'Tasks', lines: [line] }]),
+      write: async (path, line) => {
+        beginJournal();
+        try {
+          return await appendUnderHeading(this.app, [
+            { file: path, heading: 'Tasks', lines: [line] },
+          ]);
+        } finally {
+          this.undoStack.push('Capture a task', endJournal());
+        }
+      },
     }).open();
   }
 
@@ -431,7 +453,7 @@ export default class WeekfitPlugin extends Plugin {
     text: string,
     done: boolean,
   ): Promise<void> {
-    await this.applyWrite(
+    await this.applyWrite(done ? 'Mark done' : 'Mark not done', () =>
       setTaskDone(this.app, [{ file, line, expectedText: text, title: taskTitle(text), done }]),
     );
   }
@@ -456,7 +478,7 @@ export default class WeekfitPlugin extends Plugin {
     const isDaily =
       file === notePathFor(addDays(snap.weekStart, day), locations.daily.folder, locations.daily.format);
 
-    await this.applyEdits([
+    await this.applyEdits('Schedule a task', [
       {
         file,
         line,
@@ -595,7 +617,9 @@ export default class WeekfitPlugin extends Plugin {
       review,
       nextWeekPath,
       onWriteReview: async () => {
+        beginJournal();
         const r = await writeReview(this.app, snapshot, review, this.settings);
+        this.undoStack.push('Write the weekly review', endJournal());
         await this.refresh();
         return r;
       },
@@ -606,6 +630,7 @@ export default class WeekfitPlugin extends Plugin {
         // `## Intentions`, and no `## Review` for the review flow to write into
         // when that week ends. Rolling work into a malformed note is a quiet
         // way to break the week you're rolling into.
+        beginJournal();
         if (!this.app.vault.getAbstractFileByPath(nextWeekPath)) {
           await createNote(
             this.app,
@@ -614,6 +639,10 @@ export default class WeekfitPlugin extends Plugin {
           );
         }
         const r = await rollForward(this.app, snapshot, review, nextWeekPath, this.settings);
+        this.undoStack.push(
+          `Roll ${review.unfinished.length} task(s) forward`,
+          endJournal(),
+        );
         await this.refresh();
         return r;
       },
@@ -632,7 +661,9 @@ export default class WeekfitPlugin extends Plugin {
       await this.openLine(path, 0);
       return;
     }
+    beginJournal();
     const result = await createNote(this.app, path, weeklyNoteTemplate(this.weekStart));
+    this.undoStack.push("Create this week's note", endJournal());
     if (result.errors.length) {
       new Notice(`Weekfit: could not create ${path} — ${result.errors[0]}`);
       return;
@@ -694,8 +725,21 @@ export default class WeekfitPlugin extends Plugin {
 
   /** Run a write, record what happened, tell the user if a whole file failed,
    *  and re-read. Every write in this plugin ends the same way. */
-  private async applyWrite(work: Promise<WriteResult>): Promise<void> {
-    this.lastWrite = await work;
+  /**
+   * Run a write, record what it did to the vault so it can be undone, tell the
+   * user if a whole file failed, and re-read.
+   *
+   * Every write goes through here, which is the only reason a single undo step
+   * can span the several files a roll-forward touches: the journal is opened
+   * around the *action*, not around each file.
+   */
+  private async applyWrite(label: string, work: () => Promise<WriteResult>): Promise<void> {
+    beginJournal();
+    try {
+      this.lastWrite = await work();
+    } finally {
+      this.undoStack.push(label, endJournal());
+    }
     if (this.lastWrite.errors.length) {
       new Notice(
         `Weekfit: ${this.lastWrite.errors.length} file(s) could not be written — see the view.`,
@@ -704,9 +748,32 @@ export default class WeekfitPlugin extends Plugin {
     await this.refresh();
   }
 
-  private async applyEdits(edits: PlacementEdit[]): Promise<void> {
+  /** Put the last Weekfit change back. */
+  private async undoLast(): Promise<void> {
+    const pending = this.undoStack.peek();
+    if (!pending) {
+      new Notice('Weekfit: nothing to undo in this session.');
+      return;
+    }
+    const result = await this.undoStack.undo(this.app);
+    if (!result) return;
+
+    const parts = [`Weekfit: undid "${result.label}"`];
+    if (result.refused.length) {
+      // Naming the files matters: the user has to know which half of the
+      // change is still in place, and why it was left alone.
+      parts.push(
+        `${result.refused.length} file(s) left alone because they changed since: ${result.refused.join(', ')}`,
+      );
+    }
+    if (result.errors.length) parts.push(`${result.errors.length} error(s)`);
+    new Notice(parts.join(' — '));
+    await this.refresh();
+  }
+
+  private async applyEdits(label: string, edits: PlacementEdit[]): Promise<void> {
     if (!edits.length) return;
-    await this.applyWrite(editPlacements(this.app, edits));
+    await this.applyWrite(label, () => editPlacements(this.app, edits));
   }
 
   private async moveBlock(uid: string, day: number, startMin: number): Promise<void> {
@@ -723,7 +790,7 @@ export default class WeekfitPlugin extends Plugin {
       target.file ===
       notePathFor(addDays(snap.weekStart, day), locations.daily.folder, locations.daily.format);
 
-    await this.applyEdits([
+    await this.applyEdits('Move a block', [
       {
         file: target.file,
         line: target.line,
@@ -750,7 +817,7 @@ export default class WeekfitPlugin extends Plugin {
   private async resizeBlock(uid: string, startMin: number, endMin: number): Promise<void> {
     const target = this.lineFor(uid);
     if (!target) return;
-    await this.applyEdits([
+    await this.applyEdits('Resize a block', [
       {
         file: target.file,
         line: target.line,
@@ -781,7 +848,7 @@ export default class WeekfitPlugin extends Plugin {
   private async unschedule(uid: string): Promise<void> {
     const target = this.lineFor(uid);
     if (!target) return;
-    await this.applyEdits([
+    await this.applyEdits('Unschedule a block', [
       {
         file: target.file,
         line: target.line,

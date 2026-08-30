@@ -28,6 +28,7 @@ import { clearCompletion, parseTaskMeta, taskTitle, withCompletion } from '../li
 import type { MetaFlavour } from '../lib/taskmeta';
 import { applyPlacement, hasPlacement, splitTaskPrefix } from './dayplanner';
 import type { PlacementEdit, WriteResult, WriteSkip } from './contract';
+import { isJournalling, record } from './journal';
 
 /** Local-time `YYYY-MM-DD` for day `day` (0 = Monday) of the week starting
  *  `weekStart` — the same construction `IntentionsRail`'s `todayIso` uses,
@@ -60,6 +61,38 @@ function groupByKey<T>(items: T[], key: (item: T) => string): Map<string, T[]> {
  *  unschedule) will report skips against. */
 function locationKey(e: { file: string; line: number }): string {
   return `${e.file}:${e.line}`;
+}
+
+
+// ---------------------------------------------------------------------------
+// Journalled primitives
+//
+// Every write below goes through one of these two, so an undo journal can
+// never miss a change by a call site forgetting to record one. They are the
+// only place `vault.process` and `vault.create` are called.
+// ---------------------------------------------------------------------------
+
+/** `vault.process`, with the before/after content recorded for undo. */
+async function processFile(
+  app: App,
+  file: TFile,
+  fn: (data: string) => string,
+): Promise<void> {
+  let before: string | null = null;
+  let after = '';
+  await app.vault.process(file, (data: string) => {
+    before = data;
+    after = fn(data);
+    return after;
+  });
+  record(file.path, before, after);
+}
+
+/** `vault.create`, likewise. `before: null` marks the file as ours to remove
+ *  if the action is undone. */
+async function createFile(app: App, path: string, content: string): Promise<void> {
+  await app.vault.create(path, content);
+  record(path, null, content);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +156,7 @@ async function rewriteVerifiedLines<T extends VerifiedEdit>(
       const applied = new Set<string>();
       const doomed = new Set<number>();
 
-      await app.vault.process(file, (data: string) => {
+      await processFile(app, file, (data: string) => {
         // Detect the file's own line ending rather than assuming one, so a
         // CRLF note comes back CRLF and an LF note comes back LF.
         const eol = data.includes('\r\n') ? '\r\n' : '\n';
@@ -610,12 +643,12 @@ export async function appendUnderHeading(app: App, edits: AppendEdit[]): Promise
         for (const e of fileEdits) {
           lines = applyAppend(lines, e.heading, e.lines, eol);
         }
-        await app.vault.create(filePath, lines.join(eol));
+        await createFile(app, filePath, lines.join(eol));
         written += fileEdits.length;
         continue;
       }
 
-      await app.vault.process(file, (data: string) => {
+      await processFile(app, file, (data: string) => {
         const eol = data.includes('\r\n') ? '\r\n' : '\n';
         let lines = data.split(eol);
         for (const e of fileEdits) {
@@ -682,7 +715,7 @@ export async function removeLines(app: App, edits: RemoveLineEdit[]): Promise<Wr
       // still waiting to be verified/removed within this same file.
       const ordered = [...fileEdits].sort((a, b) => b.line - a.line);
 
-      await app.vault.process(file, (data: string) => {
+      await processFile(app, file, (data: string) => {
         const eol = data.includes('\r\n') ? '\r\n' : '\n';
         const lines = data.split(eol);
 
@@ -745,9 +778,16 @@ export async function setFrontmatter(
       return { written, skipped, errors };
     }
 
+    // `processFrontMatter` is Obsidian's own atomic edit and does not hand
+    // over the file's text, so the journal has to bracket it: read either
+    // side. Without this an undo would restore the lines but silently leave
+    // the review's frontmatter behind, which is the half nothing on screen
+    // would show.
+    const before = isJournalling() ? await app.vault.cachedRead(f) : null;
     await app.fileManager.processFrontMatter(f, (frontmatter: Record<string, unknown>) => {
       Object.assign(frontmatter, patch);
     });
+    if (before != null) record(f.path, before, await app.vault.cachedRead(f));
     written = 1;
   } catch (err) {
     errors.push(`${file}: ${err instanceof Error ? err.message : String(err)}`);
@@ -869,7 +909,7 @@ export async function replaceChildSessions(
       // lower-numbered parent still waiting its turn.
       const ordered = [...fileEdits].sort((a, b) => b.line - a.line);
 
-      await app.vault.process(file, (data: string) => {
+      await processFile(app, file, (data: string) => {
         const eol = data.includes('\r\n') ? '\r\n' : '\n';
         const lines = data.split(eol);
 
@@ -956,7 +996,7 @@ export async function createNote(app: App, file: string, content: string): Promi
       }
     }
 
-    await app.vault.create(file, content);
+    await createFile(app, file, content);
     return { written: 1, skipped: [], errors };
   } catch (err) {
     errors.push(`${file}: ${err instanceof Error ? err.message : String(err)}`);
