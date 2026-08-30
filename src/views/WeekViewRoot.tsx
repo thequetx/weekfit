@@ -2,7 +2,7 @@
 // imports, so it can be rendered directly in a test (see
 // test/WeekViewRoot.test.tsx) without needing an Obsidian runtime.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { FitState, WeekSnapshot, WeekfitSettings, WriteResult } from '../data/contract';
 import { fmtWeekRange } from '../lib/week';
 import type { VaultTask } from '../lib/types';
@@ -138,6 +138,15 @@ export function WeekViewRoot({
   // either child because the gesture starts in one (the rail) and finishes in
   // the other (the grid, which owns the geometry).
   const [incoming, setIncoming] = useState<{ task: VaultTask; minutes: number } | null>(null);
+  // The grid owns every drag but has no idea where the rail is, so the
+  // hit-test lives here, next to the element it tests.
+  const railRef = useRef<HTMLDivElement | null>(null);
+  const isOverRail = (clientX: number, clientY: number): boolean => {
+    const el = railRef.current;
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return clientX >= r.left && clientX < r.right && clientY >= r.top && clientY < r.bottom;
+  };
 
   if (!snapshot) {
     return (
@@ -337,13 +346,16 @@ export function WeekViewRoot({
           onResizeProposal={onResizeProposal}
           incoming={incoming}
           onIncomingEnd={() => setIncoming(null)}
+          isOverRail={isOverRail}
           onDropTask={(task, day, startMin) =>
             onScheduleTask(task.file, task.line, task.text, day, startMin)
           }
         />
+        <div className="weekfit-railwrap" ref={railRef}>
         <IntentionsRail
           tasks={unscheduledSource}
           durations={settings.durations}
+          scheduledLines={snapshot.scheduledLines}
           weeklyNotePath={snapshot.notePath}
           onOpenTask={(t) => onOpenTask(t.file, t.line)}
           onToggleDone={(t) => onToggleDone(t.file, t.line, t.text, !t.done)}
@@ -353,6 +365,7 @@ export function WeekViewRoot({
           }}
           onDragStart={(task, minutes) => setIncoming({ task, minutes })}
         />
+        </div>
       </div>
     </div>
   );

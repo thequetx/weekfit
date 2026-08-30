@@ -54,6 +54,13 @@ export interface WeekGridProps {
   /** The incoming drag ended, however it ended — so the caller can clear it. */
   onIncomingEnd: () => void;
   /**
+   * Is this point over the rail? The grid owns every drag but does not know
+   * where the rail is, so the caller supplies the hit-test. Dropping a block
+   * there unschedules it — the mirror of dragging one out of the rail, and the
+   * gesture people reach for first.
+   */
+  isOverRail?: (clientX: number, clientY: number) => boolean;
+  /**
    * Edge-drag resize — a block's top edge re-times its start (end fixed), its
    * bottom edge re-times its end (start fixed). Reports only the *final*
    * interval, on pointer-up; the drag's own preview is local state (see
@@ -272,6 +279,7 @@ export function WeekGrid({
   incoming,
   onDropTask,
   onIncomingEnd,
+  isOverRail,
   onResizeBlock,
   onResizeProposal,
 }: WeekGridProps) {
@@ -402,6 +410,14 @@ export function WeekGrid({
     setDragKind(null);
     setPreview(null);
     if (!drag || !drag.moved) return;
+
+    // A ghost dropped on the rail is dismissed — the same gesture that
+    // unschedules a real block, meaning the same thing: take this off the
+    // week. Nothing is written either way; a ghost was never on disk.
+    if (isOverRail?.(e.clientX, e.clientY)) {
+      onDismiss(drag.proposal.groupKey);
+      return;
+    }
 
     const day = dayAt(e.clientX);
     const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, drag.proposal.minutes);
@@ -578,6 +594,13 @@ export function WeekGrid({
     const dy = e.clientY - drag.startClientY;
     if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
     drag.moved = true;
+    // Over the rail mid-drag: stop previewing a placement, since releasing
+    // here takes the block off the week rather than putting it somewhere.
+    if (isOverRail?.(e.clientX, e.clientY)) {
+      setEventPreview(null);
+      return;
+    }
+
     const day = dayAt(e.clientX);
     const orig = eventMinutes(drag.ev);
     const durationMin = Math.max(orig.endMin - orig.startMin, 1);
@@ -596,6 +619,13 @@ export function WeekGrid({
       // Never crossed the threshold -> a click, not a drag. Opens the source
       // line instead of moving anything.
       onOpenSource(drag.ev.uid);
+      return;
+    }
+
+    // Released over the rail: that is "take this off the week", not a move to
+    // whichever day column happens to be nearest the pointer.
+    if (isOverRail?.(e.clientX, e.clientY)) {
+      onUnschedule(drag.ev.uid);
       return;
     }
 

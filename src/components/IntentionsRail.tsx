@@ -4,6 +4,7 @@ import type { TaskDuration } from '../lib/duration';
 import { PRIORITY_EMOJI, compareMeta, fmtDue, isOverdue, parseTaskMeta } from '../lib/taskmeta';
 import type { TaskMeta } from '../lib/taskmeta';
 import { hasPlacement } from '../data/dayplanner';
+import { isUnscheduled } from '../data/sessions';
 import type { DurationMap, VaultTask } from '../lib/types';
 
 /** Phase 2 seam — a proposed placement from "Fit this week". Never populated
@@ -19,6 +20,12 @@ export interface IntentionsRailProps {
    *  scheduled) and sorting happen in here, same as it did there. */
   tasks: VaultTask[];
   durations: DurationMap;
+  /**
+   * The lines behind the week's scheduled blocks. Needed because a task split
+   * across sittings carries no time on its own line — its children do — so
+   * without this the rail lists work that is plainly on the grid beside it.
+   */
+  scheduledLines?: VaultTask[];
   /** Phase 2 seam: proposals to draw beside their task. Always `[]` in
    *  Phase 1 — nothing produces one yet. */
   proposals?: RailProposal[];
@@ -85,6 +92,7 @@ interface RailRow {
 export function IntentionsRail({
   tasks,
   durations,
+  scheduledLines = [],
   weeklyNotePath = null,
   onOpenTask,
   onToggleDone,
@@ -94,7 +102,7 @@ export function IntentionsRail({
   const today = todayIso();
 
   const rows: RailRow[] = tasks
-    .filter((t) => !t.done && !hasPlacement(t.text))
+    .filter((t) => isUnscheduled(t, scheduledLines, hasPlacement))
     .map((t) => ({
       t,
       meta: parseTaskMeta(t.text),
