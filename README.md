@@ -85,7 +85,7 @@ still sitting in your notes in a format three other tools understand.
 | **Splitting** | A task too big for one gap becomes several sittings, written as sub-tasks |
 | **Replan** | Re-fits what didn't happen. The feature that makes this useful on a Wednesday |
 | **Weekly review** | Planned vs kept, plus frontmatter an Obsidian Bases table can read |
-| **Roll forward** | Carries unfinished work into next week, keeping every annotation |
+| **Roll forward** | Carries unfinished work into next week, keeping every annotation. Leaves anything still scheduled later in the week where it is |
 | **Backlog + capture** | Somewhere for later, and a one-line way to get things there |
 
 ## How your notes are treated
@@ -146,7 +146,7 @@ keep in sync. You can override it.
 
 **Not yet released.** Phases 0–4 of the build are complete: the planning engine, the vault
 adapter, the week view, fitting and its write path, splitting, replan, review, backlog and
-capture. **706 tests**, including component tests and an end-to-end pass that runs the real
+capture. **719 tests**, including component tests and an end-to-end pass that runs the real
 read → fit → write pipeline against real files on disk and asserts the resulting bytes.
 
 ⚠️ Drag and resize arithmetic is covered by tests with stubbed geometry, but no automated
