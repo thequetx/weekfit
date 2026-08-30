@@ -192,9 +192,15 @@
   flex-direction: column;
 }
 
+/* Sticks with the day headers — otherwise the hour labels scroll up under a
+   pinned header row and the gutter's corner shows grid lines through it. */
 .weekfit-grid__gutterhead {
   min-height: 34px;
   border-bottom: 1px solid var(--background-modifier-border);
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  background: var(--background-primary);
 }
 
 .weekfit-grid__gutterbody {
@@ -226,6 +232,16 @@
   background: color-mix(in srgb, var(--interactive-accent) 6%, transparent);
 }
 
+/* `.weekfit-grid` is the scroll container and these headers are ordinary
+   in-flow children of each column, so scrolling to the evening took the day
+   names off screen — seven near-identical columns and nothing saying which
+   one is Thursday. They stick to the top of the scrollport instead.
+
+   z-index 8 clears everything that can be drawn in a day body: real blocks
+   (2), resize handles (3), ghosts and their actions (4), a hovered block (5),
+   escaped ghost actions (6). Sticky doesn't leave the flow, so nothing below
+   moves and the drag arithmetic — which measures `.weekfit-grid__body` —
+   is untouched. The background has to be opaque or blocks scroll through it. */
 .weekfit-grid__colhead {
   display: flex;
   align-items: baseline;
@@ -234,6 +250,17 @@
   padding: 4px 6px;
   min-height: 34px;
   border-bottom: 1px solid var(--background-modifier-border);
+  position: sticky;
+  top: 0;
+  z-index: 8;
+  background: var(--background-primary);
+}
+
+/* Today's tint lives on the column, which the opaque header would cover —
+   so the header carries it too, keeping the column readable top to bottom. */
+.weekfit-grid__col--today .weekfit-grid__colhead {
+  background: var(--background-primary-alt); /* fallback: no color-mix */
+  background: color-mix(in srgb, var(--interactive-accent) 6%, var(--background-primary));
 }
 
 .weekfit-grid__dow {
