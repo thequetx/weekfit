@@ -1,6 +1,43 @@
 # Shipping Weekfit
 
-Everything below is ready. These are the steps that need your account, in order.
+> **Weekfit is published.** 0.1.1 is live at
+> <https://community.obsidian.md/plugins/weekfit>, built from
+> <https://github.com/thequetx/weekfit>. Sections 0–3 are the first-time steps
+> and are kept as a record of what was actually done, including two places the
+> documented process was wrong. **To ship an update, you only need
+> "Shipping a new version" directly below.**
+
+## Shipping a new version
+
+```bash
+cd C:/Users/tyler/weekfit
+npm test
+# bump "version" in manifest.json and package.json, and add the new
+# version to versions.json mapped to its minimum Obsidian version
+npm run release
+git add -A && git commit -m "Weekfit 0.1.2"
+git push origin master
+git tag -a 0.1.2 -m "Weekfit 0.1.2" && git push origin 0.1.2
+gh release create 0.1.2 release/main.js release/manifest.json release/styles.css \
+  --title "0.1.2" --notes-file RELEASE-NOTES.md
+```
+
+Then nothing. The directory reads `manifest.json` at the HEAD of the default
+branch and picks the release up on its own — there is no resubmission step.
+
+Three things that will bite:
+
+- **The tag never takes a `v`.** Obsidian matches it against `manifest.json`'s
+  `version` character for character.
+- **`versions.json` must gain the new version**, mapped to the lowest Obsidian
+  it actually runs on. Getting this wrong points people at a build that will
+  not load for them.
+- **`npm run release` is not optional.** See section 2 for what happened the
+  one time the staged artifacts were assumed fresh.
+
+---
+
+Everything below is the first release, kept for the record.
 
 ## 0. Before anything
 

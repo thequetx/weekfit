@@ -35,8 +35,8 @@ One module writes. It re-reads the target line before changing it and **refuses 
 
 ## Please know before installing
 
-- **Desktop only for this release.** Everything is pointer-based and should work on touch, but nothing has been tested on a phone or tablet, so the manifest says so rather than claiming support that hasn't been earned.
-- **Undo is one command, not a guarantee.** `Weekfit: Undo last Weekfit change` puts back the last thing it did, across every file that change touched — but it refuses if you've edited the note since, and it only lasts for the session. Writes still land in your notes immediately, so it's worth a scratch vault for the first hour.
+- **Requires Obsidian 1.7.2 or later**, and is **desktop only for this release.** Everything is pointer-based and should work on touch, but nothing has been tested on a phone or tablet.
+- **Undo is one command, not a guarantee.** `Weekfit: Undo last change` puts back the last thing it did, across every file that change touched — but it refuses if you've edited the note since, and it only lasts for the session. Writes still land in your notes immediately, so it's worth a scratch vault for the first hour.
 - No Google Calendar, no AI, no account, no telemetry.
 
 905 tests, including an end-to-end pass that runs the real read → fit → write pipeline against real files on disk and asserts the resulting bytes. MIT.

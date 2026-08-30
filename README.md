@@ -6,29 +6,33 @@ Weekfit takes the tasks you already have, the hours you're actually available, a
 things already in your week — and proposes where the work goes. You accept what you like,
 drag what you don't, and it writes plain text back into your notes.
 
-<img width="1200" height="800" alt="1-fit-this-week" src="https://github.com/user-attachments/assets/17c3e0ea-bf5a-438f-b88a-2fa632b9ac69" />
+![A week with nine proposed placements on it, the unscheduled rail beside it, and the
+capacity line reading "11h committed / 28h free"](docs/weekfit.png)
 
-<img width="1200" height="800" alt="2-a-real-week" src="https://github.com/user-attachments/assets/9e0b3787-190b-4e66-8104-e9cf7c8f8a35" />
+![The same view on a week already underway — the now-line across today, and a block
+marked as clashing with a recurring commitment](docs/a-real-week.png)
 
-<img width="1200" height="800" alt="3-first-run" src="https://github.com/user-attachments/assets/3f9f3b92-4402-46f2-9361-e9bb2e4916ae" />
-
+![An empty week, offering to create the note and explaining the three sections it
+gets](docs/first-run.png)
 
 ---
 
 ## Getting started
 
-1. **Install and enable** Weekfit.
-2. **Settings → Weekfit → add an availability window** — *when* work could happen, e.g.
+**Install** from the [Obsidian directory](https://community.obsidian.md/plugins/weekfit),
+then enable it in **Settings → Community plugins**.
+
+1. **Settings → Weekfit → add an availability window** — *when* work could happen, e.g.
    weekdays 09:00–17:00. This is the one setting with no sensible default: without it
    there is nowhere to fit anything, and Weekfit says so rather than sitting there
    looking broken.
-3. *(Optional)* add your **recurring commitments** — gym, stream, a standing meeting.
+2. *(Optional)* add your **recurring commitments** — gym, stream, a standing meeting.
    They're drawn behind the week and treated as busy.
-4. *(Optional)* set **durations by tag**, so untagged, unestimated tasks still get a size.
-5. Run **`Weekfit: Create this week's note`** from the command palette (`Ctrl/Cmd+P`).
+3. *(Optional)* set **durations by tag**, so untagged, unestimated tasks still get a size.
+4. Run **`Weekfit: Create this week's note`** from the command palette (`Ctrl/Cmd+P`).
    You get a note with three sections and nothing else to learn.
-6. Put anything under `## Tasks`. A plain `- [ ] Book dentist` is enough.
-7. Open the week view and press **Fit this week**.
+5. Put anything under `## Tasks`. A plain `- [ ] Book dentist` is enough.
+6. Open the week view and press **Fit this week**.
 
 You'll get **ghosts** — proposals, not commitments. Accept one, accept all, dismiss, or
 drag one somewhere else first. **Nothing is written until you accept.**
@@ -131,7 +135,7 @@ This is the part worth trusting before you install anything that writes to your 
 | `Create this week's note` | Seeds the note with the three sections |
 | `Previous week` / `Next week` / `Go to this week` | Navigation |
 | `Toggle gap candidates` | Shows the free slots the engine can see |
-| `Undo last Weekfit change` | Puts back the last thing Weekfit wrote |
+| `Undo last change` | Puts back the last thing Weekfit wrote |
 | `Refresh week` | Re-reads the vault |
 
 No hotkeys are claimed — bind your own in Settings → Hotkeys.
@@ -158,17 +162,20 @@ keep in sync. You can override it.
 
 ## Status
 
-**Not yet released.** The planning engine, the vault adapter, the week view, fitting and
-its write path, splitting, replan, review, backlog and capture are all built and in daily
-use by the author. **905 tests**, including component tests and an end-to-end pass that
-runs the real read → fit → write pipeline against real files on disk and asserts the
-resulting bytes.
+**Released — [0.1.1](https://github.com/thequetx/weekfit/releases/tag/0.1.1), listed in the
+[Obsidian directory](https://community.obsidian.md/plugins/weekfit).** First public
+version, so treat it accordingly: it is in daily use by the author and has **905 tests**,
+including component tests and an end-to-end pass that runs the real read → fit → write
+pipeline against real files on disk and asserts the resulting bytes — but nobody else's
+vault has met it yet. A scratch vault for the first hour is not a bad idea.
+
+Requires **Obsidian 1.7.2** or later.
 
 **Desktop only for now.** Everything is pointer-based and should work on touch, but
 nothing has been tested on a phone or tablet, so the manifest says so rather than
 claiming support that hasn't been earned.
 
-**There is an undo.** `Weekfit: Undo last Weekfit change` puts back the last thing it
+**There is an undo.** `Weekfit: Undo last change` puts back the last thing it
 did — including a roll-forward that moved tasks between two notes, which Obsidian's own
 per-file undo can't reach. It refuses rather than clobbers: if you edited a note after
 Weekfit wrote it, that file is left exactly as it is and you're told which. It lasts for
