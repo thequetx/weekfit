@@ -378,7 +378,7 @@ export default class WeekfitPlugin extends Plugin {
       new Notice(`Weekfit: ${errors.length} file(s) could not be read for the backlog.`);
     }
 
-    const items = collectBacklog(tasks, this.settings);
+    const items = collectBacklog(tasks, this.settings, this.snapshot?.scheduledLines ?? []);
     for (const leaf of leaves) {
       const view = leaf.view;
       if (view instanceof BacklogView) {

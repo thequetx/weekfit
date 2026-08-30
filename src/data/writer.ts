@@ -95,6 +95,13 @@ async function rewriteVerifiedLines<T extends VerifiedEdit>(
   app: App,
   edits: T[],
   transform: (current: string, edit: T) => string,
+  /**
+   * Absolute line indices this edit makes obsolete, if any. Collected across
+   * the whole batch and spliced **descending** after every transform has run,
+   * so a deletion can never shift a line another edit in the same batch is
+   * still pointing at.
+   */
+  collectDeletions?: (edit: T, lines: string[]) => number[],
 ): Promise<WriteResult> {
   const skipped: WriteSkip[] = [];
   const errors: string[] = [];
@@ -114,6 +121,7 @@ async function rewriteVerifiedLines<T extends VerifiedEdit>(
       }
 
       const applied = new Set<string>();
+      const doomed = new Set<number>();
 
       await app.vault.process(file, (data: string) => {
         // Detect the file's own line ending rather than assuming one, so a
@@ -138,8 +146,12 @@ async function rewriteVerifiedLines<T extends VerifiedEdit>(
           }
 
           lines[e.line] = transform(current, e);
+          for (const idx of collectDeletions?.(e, lines) ?? []) doomed.add(idx);
           applied.add(key);
         }
+
+        // Descending, so removing one line can't move another still queued.
+        for (const idx of [...doomed].sort((a, b) => b - a)) lines.splice(idx, 1);
 
         // Only the target lines changed above; everything else — including
         // whether the file ends on a trailing separator — round-trips via
@@ -162,9 +174,47 @@ async function rewriteVerifiedLines<T extends VerifiedEdit>(
 
 /** Set, change or remove a Day Planner placement on a verified line. */
 export async function editPlacements(app: App, edits: PlacementEdit[]): Promise<WriteResult> {
-  return rewriteVerifiedLines(app, edits, (current, e) =>
-    applyPlacement(current, { range: e.range, scheduledDate: e.scheduledDate }),
+  return rewriteVerifiedLines(
+    app,
+    edits,
+    (current, e) => applyPlacement(current, { range: e.range, scheduledDate: e.scheduledDate }),
+    // A task is either one block or several sittings — never both. Giving a
+    // line its own time makes any sittings written beneath it obsolete, so
+    // they go with it. Without this, placing a split parent books the same
+    // work three times: its own block plus every child still sitting there.
+    // Clearing the parent's range (unschedule) takes the sittings too, for
+    // the same reason — the plan for that task is being withdrawn either way.
+    (e, lines) => childSessionLines(lines, e.line),
   );
+}
+
+/**
+ * The indented sitting lines belonging to the task at `parentIndex`.
+ *
+ * Same structural rule as `replaceChildSessions` and `hasScheduledSessions`,
+ * and deliberately just as narrow: a contiguous run starting immediately
+ * below, indented deeper, each a checkbox line carrying a time range. It stops
+ * at the first line that fails any of those, so a hand-written sub-task is
+ * never swept up.
+ */
+function childSessionLines(lines: string[], parentIndex: number): number[] {
+  const parent = lines[parentIndex];
+  if (parent == null) return [];
+  const parentIndent = leadingWidth(parent);
+  const out: number[] = [];
+  for (let i = parentIndex + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!CHECKBOX_LINE_RE.test(line)) break;
+    if (leadingWidth(line) <= parentIndent) break;
+    if (!hasPlacement(line)) break;
+    out.push(i);
+  }
+  return out;
+}
+
+function leadingWidth(text: string): number {
+  const m = /^[ 	]*/.exec(text);
+  return m ? m[0].length : 0;
 }
 
 /** The checkbox itself: leading whitespace, list marker, `[ ]` or `[x]`. */

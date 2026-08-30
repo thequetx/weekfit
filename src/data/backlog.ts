@@ -10,6 +10,7 @@
 import type { DurationMap, VaultTask } from '../lib/types';
 import type { WeekfitSettings } from './contract';
 import { hasPlacement } from './dayplanner';
+import { isUnscheduled } from './sessions';
 import { compareMeta, parseTaskMeta } from '../lib/taskmeta';
 import type { TaskMeta } from '../lib/taskmeta';
 import { resolveTaskDuration } from '../lib/duration';
@@ -41,9 +42,17 @@ export interface BacklogItem {
  * fallback), and sorted the same way the rail sorts — most urgent priority
  * first, then soonest due date (`compareMeta`).
  */
-export function collectBacklog(tasks: VaultTask[], settings: WeekfitSettings): BacklogItem[] {
+export function collectBacklog(
+  tasks: VaultTask[],
+  settings: WeekfitSettings,
+  /** The week's scheduled lines, so a task split across sittings — which by
+   *  design carries no time on its own line — is not listed as backlog. The
+   *  backlog can be swept from folders the current week knows nothing about,
+   *  so this is optional and defaults to "no sittings known". */
+  scheduledLines: VaultTask[] = [],
+): BacklogItem[] {
   return tasks
-    .filter((t) => !t.done && !hasPlacement(t.text))
+    .filter((t) => isUnscheduled(t, scheduledLines, hasPlacement))
     .map((t) => ({
       task: t,
       meta: parseTaskMeta(t.text),
