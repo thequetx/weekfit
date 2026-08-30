@@ -86,6 +86,9 @@ still sitting in your notes in a format three other tools understand.
 | **Replan** | Re-fits what didn't happen. The feature that makes this useful on a Wednesday |
 | **Weekly review** | Planned vs kept, plus frontmatter an Obsidian Bases table can read |
 | **Roll forward** | Carries unfinished work into next week, keeping every annotation. Leaves anything still scheduled later in the week where it is |
+| **Balanced or soonest-first** | Spread work across the week, or fill the earliest day first |
+| **Act from the rail** | Drag a task onto the week, tick it done, open its line, or right-click for all three |
+| **Drag back to the rail** | Takes a block off the week again |
 | **Backlog + capture** | Somewhere for later, and a one-line way to get things there |
 
 ## How your notes are treated
@@ -144,13 +147,19 @@ keep in sync. You can override it.
 
 ## Status
 
-**Not yet released.** Phases 0–4 of the build are complete: the planning engine, the vault
-adapter, the week view, fitting and its write path, splitting, replan, review, backlog and
-capture. **719 tests**, including component tests and an end-to-end pass that runs the real
-read → fit → write pipeline against real files on disk and asserts the resulting bytes.
+**Not yet released.** The planning engine, the vault adapter, the week view, fitting and
+its write path, splitting, replan, review, backlog and capture are all built and in daily
+use by the author. **776 tests**, including component tests and an end-to-end pass that
+runs the real read → fit → write pipeline against real files on disk and asserts the
+resulting bytes.
 
-⚠️ Drag and resize arithmetic is covered by tests with stubbed geometry, but no automated
-test can confirm how they feel in a real pane. No screenshot exists yet.
+**Desktop only for now.** Everything is pointer-based and should work on touch, but
+nothing has been tested on a phone or tablet, so the manifest says so rather than
+claiming support that hasn't been earned.
+
+⚠️ **There is no undo.** Every accept, drag, resize, tick and roll-forward writes to your
+notes immediately. Obsidian's own undo works inside a file you have open, but roll-forward
+touches two files at once. Try it on a scratch vault first.
 
 ## Development
 
