@@ -754,16 +754,31 @@
   /* The title is the last thing to give way, not the first. Without these it
      is the only flex item that can shrink, so on any cramped ghost it — and
      nothing else — collapsed to nothing. `min-width: 0` is what lets it
-     ellipsise inside a row instead of forcing the buttons out of the block. */
-  flex: 1 1 auto;
+     ellipsise inside a row instead of forcing the buttons out of the block.
+
+     Shrink but never grow: `1 1 auto` also let the title stretch down a tall
+     ghost's whole body, which pushed Accept/Dismiss to the bottom edge on a
+     three-hour block and left them floating under a title an inch above. */
+  flex: 0 1 auto;
   min-width: 0;
 }
 
 /* Keep the actions at their natural width in a tight row; the title yields
-   around them, down to an ellipsis, rather than pushing them off the edge. */
+   around them, down to an ellipsis, rather than pushing them off the edge.
+   `margin-left: auto` pins them to the right whether the title fills the row
+   or not, so they sit in the same place on every short ghost in a week. */
 .weekfit-ghost--tight .weekfit-ghost__actions {
   flex: none;
   margin-top: 0;
+  margin-left: auto;
+}
+
+/* The `1/3` split badge is absolutely positioned top-right on a normal ghost,
+   where it has a corner to itself. In a row that corner is where the actions
+   are, so it joins the row instead of sitting on top of them. */
+.weekfit-ghost--tight .weekfit-ghost__ses {
+  position: static;
+  flex: none;
 }
 
 .weekfit-ghost__ses {

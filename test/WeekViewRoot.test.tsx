@@ -395,7 +395,9 @@ describe('WeekViewRoot — ghost proposals', () => {
     const onAccept = vi.fn();
     renderRoot({ fit: fitState({ proposals: [a, b] }), onAccept });
 
-    fireEvent.click(screen.getAllByText('Accept')[0]);
+    // The ghost's own action, not the toolbar's "Accept all" — and by class
+    // rather than by label, which changes with the block's height.
+    fireEvent.click(document.querySelectorAll('.weekfit-ghost__accept')[0]);
 
     expect(onAccept).toHaveBeenCalledTimes(1);
     expect(onAccept).toHaveBeenCalledWith('A');
@@ -411,7 +413,7 @@ describe('WeekViewRoot — ghost proposals', () => {
     const onAccept = vi.fn();
     renderRoot({ fit: fitState({ proposals: [a, b] }), onAccept });
 
-    fireEvent.click(screen.getAllByText('Accept')[1]);
+    fireEvent.click(document.querySelectorAll('.weekfit-ghost__accept')[1]);
 
     expect(onAccept).toHaveBeenCalledWith('B');
   });
@@ -433,7 +435,7 @@ describe('WeekViewRoot — ghost proposals', () => {
     const onDismiss = vi.fn();
     renderRoot({ fit: fitState({ proposals: [a, b] }), onDismiss });
 
-    fireEvent.click(screen.getAllByText('Dismiss')[1]);
+    fireEvent.click(document.querySelectorAll('.weekfit-ghost__dismiss')[1]);
 
     expect(onDismiss).toHaveBeenCalledTimes(1);
     expect(onDismiss).toHaveBeenCalledWith('B');

@@ -118,13 +118,35 @@ describe('a ghost keeps its name at every height', () => {
   });
 });
 
-describe('the escaped actions on a 30-minute ghost', () => {
-  it('shrink to a glyph so the title still has somewhere to go', () => {
-    const { container } = grid([proposal(600, 30)]);
+/**
+ * A day column is about 130px wide. "Accept" and "Dismiss" side by side are
+ * most of that, so in a row they leave the title showing `W…` — present, and
+ * no more use than absent. Whenever the ghost lays out as a row the words
+ * become glyphs, whether or not the actions had to escape the block.
+ */
+describe('the actions on a ghost laid out as a row', () => {
+  it.each([30, 45, 60])('shrink to a glyph at %imin', (minutes) => {
+    const { container } = grid([proposal(600, minutes)]);
     const g = ghost(container);
-    expect(g.classList.contains('weekfit-ghost--escape')).toBe(true);
+    expect(g.classList.contains('weekfit-ghost--tight')).toBe(true);
     expect(g.querySelector('.weekfit-ghost__accept')!.textContent).toBe('✓');
     expect(g.querySelector('.weekfit-ghost__dismiss')!.textContent).toBe('✕');
+  });
+
+  // The hour-long ghost is the one a screenshot caught: tall enough not to
+  // escape, so it kept the words, and narrow enough that they ate the title.
+  it('shrinks them on an hour-long ghost, which does not escape', () => {
+    const { container } = grid([proposal(600, 60)]);
+    const g = ghost(container);
+    expect(g.classList.contains('weekfit-ghost--escape')).toBe(false);
+    expect(g.querySelector('.weekfit-ghost__accept')!.textContent).toBe('✓');
+    expect(g.querySelector('.weekfit-ghost__title')!.textContent).toBe('Chase the invoice');
+  });
+
+  it('escapes the block only when it is too short to hold them at all', () => {
+    expect(
+      ghost(grid([proposal(600, 30)]).container).classList.contains('weekfit-ghost--escape'),
+    ).toBe(true);
   });
 
   // A glyph is not a name. Losing the word from the button is only safe

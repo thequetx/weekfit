@@ -175,10 +175,12 @@ export function GhostBlock({
           previously clipped, which left a 30-minute proposal with no way to
           accept or dismiss it at all.
 
-          There they shrink to a tick and a cross. Two words at that size take
-          most of a day column and squeeze the title out — which trades one
-          unusable ghost for an anonymous one. The accessible name and the
-          tooltip still say "Accept this placement" in full. */}
+          Whenever the ghost is laid out as a row — escaped or not — the words
+          become a tick and a cross. A day column is about 130px wide and
+          "Accept" plus "Dismiss" is most of that, so beside a title they left
+          it showing `W…`: technically present, and no more use than absent.
+          The accessible name and the tooltip still say "Accept this
+          placement" in full. */}
       <div className={`weekfit-ghost__actions${veryShort ? ' weekfit-ghost__actions--escape' : ''}`}>
         <button
           type="button"
@@ -190,9 +192,9 @@ export function GhostBlock({
           // would replace a perfectly good visible name ("Accept all 3") with
           // a longer one, which is how this broke two existing tests — they
           // were right and it was wrong.
-          aria-label={veryShort ? acceptLabel : undefined}
+          aria-label={tight ? acceptLabel : undefined}
         >
-          {veryShort ? '✓' : linked ? `Accept all ${proposal.sessions}` : 'Accept'}
+          {tight ? '✓' : linked ? `Accept all ${proposal.sessions}` : 'Accept'}
         </button>
         <button
           type="button"
@@ -200,9 +202,9 @@ export function GhostBlock({
           onPointerDown={(e) => e.stopPropagation()}
           onClick={() => onDismiss(proposal.groupKey)}
           title={dismissLabel}
-          aria-label={veryShort ? dismissLabel : undefined}
+          aria-label={tight ? dismissLabel : undefined}
         >
-          {veryShort ? '✕' : linked ? `Dismiss all ${proposal.sessions}` : 'Dismiss'}
+          {tight ? '✕' : linked ? `Dismiss all ${proposal.sessions}` : 'Dismiss'}
         </button>
       </div>
     </div>
