@@ -140,6 +140,23 @@ export class SettingsTab extends PluginSettingTab {
       steps.createEl('li', { text: 'Open the week view and press "Fit this week".' });
     }
 
+    // --- how fitting distributes work --------------------------------
+    new Setting(containerEl)
+      .setName('How "Fit this week" spreads work')
+      .setDesc(
+        'Balanced offers each task the day with the most room left, so a week comes back ' +
+          'evenly loaded. Soonest first fills the earliest day before touching the next — ' +
+          'useful if you would rather get everything done early and keep the slack at the end.',
+      )
+      .addDropdown((dd) => {
+        dd.addOptions({ spread: 'Balanced across the week', earliest: 'Soonest first' });
+        dd.setValue(settings.fitStrategy);
+        dd.onChange(async (value) => {
+          settings.fitStrategy = value === 'earliest' ? 'earliest' : 'spread';
+          await save();
+        });
+      });
+
     // --- note mode ---------------------------------------------------
     new Setting(containerEl)
       .setName('Where tasks live')

@@ -483,6 +483,25 @@ export default class WeekfitPlugin extends Plugin {
     const line = snap.scheduledLines[i];
     if (!ev || !line) return;
 
+    // A sitting is already a piece of a task. Splitting one nests a level
+    // deeper every time, and the tree it makes is both unreadable and enough
+    // to break the parent-detection that decides what belongs in the rail —
+    // observed in a real note as a three-deep nest with rangeless lines in it.
+    // One level of sittings is the format; there is no second level.
+    const above = snap.scheduledLines.find(
+      (l) => l.file === line.file && l.line === line.line - 1,
+    );
+    const indent = (t: string) => (/^[ 	]*/.exec(t)?.[0].length ?? 0);
+    const parentAbove = [...snap.tasks, ...snap.thisweek, ...snap.scheduledLines].find(
+      (t) => t.file === line.file && t.line < line.line && indent(t.text) < indent(line.text),
+    );
+    if (indent(line.text) > 0 && (above != null || parentAbove != null)) {
+      new Notice(
+        'Weekfit: this is already one sitting of a task. Unschedule it, or split the task itself.',
+      );
+      return;
+    }
+
     const target: SplitTarget = {
       uid,
       task: line,

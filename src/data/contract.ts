@@ -97,6 +97,15 @@ export interface WeekfitSettings {
   durations: DurationMap;
   /** Gap candidates drawn faintly behind the grid. Off by default. */
   showGaps: boolean;
+  /**
+   * How "Fit this week" distributes work.
+   *
+   * `earliest` is the ported engine's own rule — soonest day first, which
+   * fills Monday before it touches Tuesday. `spread` offers each task the day
+   * with the most room left, so a week with real capacity comes back balanced
+   * rather than front-loaded.
+   */
+  fitStrategy: 'spread' | 'earliest';
 }
 
 export const DEFAULT_SETTINGS: WeekfitSettings = {
@@ -117,6 +126,9 @@ export const DEFAULT_SETTINGS: WeekfitSettings = {
   ],
   durations: { defaultMinutes: 60, byKind: {} },
   showGaps: false,
+  // Front-loading is what the raw engine does and it is rarely what anyone
+  // wants to look at, so the balanced pass is the default.
+  fitStrategy: 'spread',
 };
 
 // ---------------------------------------------------------------------------

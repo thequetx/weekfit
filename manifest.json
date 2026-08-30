@@ -5,5 +5,5 @@
   "minAppVersion": "1.4.0",
   "description": "Press one button and see where the week's work fits. Schedules your unscheduled tasks into the gaps between your commitments.",
   "author": "Tyler Williams",
-  "isDesktopOnly": false
+  "isDesktopOnly": true
 }

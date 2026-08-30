@@ -5,10 +5,17 @@
 // Pure: no Obsidian, no IPC, no clock read internally — `now` is a parameter,
 // exactly like every `lib/` function it calls.
 
-import { computeGaps, fitTasks, freeMinutes } from '../lib/gaps';
+import { computeGaps, fitTasks, freeMinutes, futureSessions } from '../lib/gaps';
+import type { PlaceItem } from '../lib/gaps';
+import { placeSpread } from './spread';
+import { resolveTaskDuration, taskKind } from '../lib/duration';
+import { parseTaskId } from '../lib/taskid';
 import type { Proposal } from '../lib/gaps';
 import { committedMinutes, snapToGrid } from '../lib/duration';
 import { passedBlocks, replanFit } from '../lib/replan';
+import { gapWindowNames } from '../lib/gaps';
+import type { Gap } from '../lib/gaps';
+import type { CalEvent } from '../lib/types';
 import { applyPlacement, hasPlacement } from './dayplanner';
 import { isRailTask } from './sessions';
 import type { VaultTask } from '../lib/types';
@@ -46,10 +53,13 @@ export function computeFit(
 
   const unscheduled = unscheduledTasks(snapshot);
 
-  const { proposals, unplaced } = fitTasks(unscheduled, gaps, settings.durations, {
-    events: snapshot.scheduled,
-    now,
-  });
+  const { proposals, unplaced } =
+    settings.fitStrategy === 'earliest'
+      ? fitTasks(unscheduled, gaps, settings.durations, { events: snapshot.scheduled, now })
+      : placeSpread(
+          buildItems(unscheduled, gaps, settings.durations, snapshot.scheduled, now),
+          gaps,
+        );
 
   const committedMin = committedMinutes(unscheduled, settings.durations);
   const freeMin = freeMinutes(settings.windows, gaps);
@@ -153,4 +163,39 @@ export function proposalGroups(proposals: Proposal[]): Map<string, Proposal[]> {
     else map.set(p.groupKey, [p]);
   }
   return map;
+}
+
+/**
+ * The same `PlaceItem` construction `fitTasks` does internally, lifted out so
+ * the spread pass can feed the engine identical input. Deliberately a mirror
+ * rather than a variation: if the two ever disagree about what a task's size,
+ * window or id is, the two strategies stop being comparable.
+ */
+function buildItems(
+  tasks: VaultTask[],
+  gaps: Gap[],
+  durations: WeekfitSettings['durations'],
+  events: CalEvent[],
+  now: Date,
+): PlaceItem[] {
+  const names = gapWindowNames(gaps);
+  const items: PlaceItem[] = [];
+  for (const t of tasks) {
+    if (t.done) continue;
+    // Already booked later in the week — leave it alone, same as `fitTasks`.
+    if (futureSessions(events, t, now).length > 0) continue;
+    const est = resolveTaskDuration(t.text, durations);
+    items.push({
+      key: `${t.file}:${t.line}`,
+      file: t.file,
+      line: t.line,
+      text: t.text,
+      title: est.title,
+      minutes: snapToGrid(est.minutes),
+      wanted: taskKind(t.text, names),
+      kind: 'fit',
+      taskId: parseTaskId(t.text) ?? undefined,
+    });
+  }
+  return items;
 }
