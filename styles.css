@@ -467,6 +467,36 @@
   pointer-events: none;
 }
 
+/* Read-only calendar-feed events (`IcsEventBlock`). Dashed and
+   muted rather than `.weekfit-ev`'s solid accent border: this is not a block
+   Weekfit booked or can edit, and it must never be mistaken for one. Every
+   value here is an existing theme custom property, same discipline as
+   `.weekfit-ev` itself, so a theme restyling one restyles the other. */
+.weekfit-ev--ics {
+  background: color-mix(in srgb, var(--background-secondary) 60%, transparent);
+  border-left-style: dashed;
+  border-left-color: var(--text-faint);
+  color: var(--text-muted);
+  opacity: 0.85;
+  /* No hover-revealed Unschedule/Split controls to make room for — this
+     block has none — but the drag affordance still needs to read as
+     "draggable to the rail", the one thing it supports. Inherited from
+     `.weekfit-ev` already, restated here since it's the property this
+     modifier's own doc comment is actually about. */
+  cursor: grab;
+}
+
+.weekfit-ev--ics .weekfit-ev__time,
+.weekfit-ev--ics .weekfit-ev__title {
+  color: var(--text-muted);
+}
+
+.weekfit-grid__chip--ics {
+  border: 1px dashed var(--text-faint);
+  background: transparent;
+  color: var(--text-muted);
+}
+
 /* Now-line — the one place crimson (`--color-red`) is used for "this instant",
    same convention the desktop app used. */
 .weekfit-nowline {

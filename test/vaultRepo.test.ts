@@ -17,7 +17,13 @@ vi.mock('obsidian', async () => {
       this.name = path.split('/').pop() ?? path;
     }
   }
-  return { moment, TFile };
+  // `VaultRepo` now pulls in `data/ics.ts`, which imports `requestUrl` from
+  // 'obsidian' at module load time — so the mock needs to export *something*
+  // callable even in tests that never touch a calendar feed. Individual
+  // tests below set its resolved value; everything else just needs it to
+  // exist so the import doesn't throw.
+  const requestUrl = vi.fn();
+  return { moment, TFile, requestUrl };
 });
 
 // `VaultRepo` debounces with `window.setTimeout` rather than the bare global.
@@ -28,7 +34,10 @@ vi.mock('obsidian', async () => {
 vi.stubGlobal('window', globalThis);
 
 const { VaultRepo } = await import('../src/data/vaultRepo');
-const { TFile } = (await import('obsidian')) as unknown as { TFile: new (path: string) => any };
+const { TFile, requestUrl } = (await import('obsidian')) as unknown as {
+  TFile: new (path: string) => any;
+  requestUrl: ReturnType<typeof vi.fn>;
+};
 const { DEFAULT_SETTINGS } = await import('../src/data/contract');
 import type { WeekfitSettings } from '../src/data/contract';
 
@@ -91,6 +100,17 @@ class FakeVault extends FakeEvents {
   }
 }
 
+/** Just enough of real Obsidian frontmatter parsing for the one field
+ *  `VaultRepo` reads (`status`) — a leading `---`-delimited block, one
+ *  `key: value` per line. Good enough for the weekly note's own frontmatter
+ *  shape; not a general YAML parser. */
+function parseFrontmatterStatus(content: string): string | undefined {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
+  if (!m) return undefined;
+  const line = m[1].split(/\r?\n/).find((l) => /^status\s*:/.test(l));
+  return line ? line.split(':').slice(1).join(':').trim() : undefined;
+}
+
 class FakeMetadataCache extends FakeEvents {
   constructor(private vault: FakeVault) {
     super();
@@ -98,7 +118,11 @@ class FakeMetadataCache extends FakeEvents {
   getFileCache(file: { path: string }) {
     const entry = this.vault.files.get(file.path);
     if (!entry) return null;
-    return { tags: (entry.tags ?? []).map((tag) => ({ tag })) };
+    const status = parseFrontmatterStatus(entry.content);
+    return {
+      tags: (entry.tags ?? []).map((tag) => ({ tag })),
+      frontmatter: status ? { status } : undefined,
+    };
   }
 }
 
@@ -326,6 +350,248 @@ describe('VaultRepo.readWeek', () => {
     await expect(repo.readWeek(WEEK_START)).resolves.toBeDefined();
     const snap = await repo.readWeek(WEEK_START);
     expect(snap.errors.some((e) => e.includes('Could not read'))).toBe(true);
+  });
+});
+
+describe('VaultRepo — ICS calendar feed', () => {
+  // `fetchIcsEvents` (data/ics.ts) windows its fetch off the wall clock by
+  // default, so these tests pin `now` to the middle of WEEK_START's week —
+  // the same discipline the rest of this codebase uses for anything
+  // clock-dependent, just done here via `vi.setSystemTime` since
+  // `VaultRepo.fetchIcsEvents()` has no `now` parameter of its own (it isn't
+  // one of `readWeek`'s inputs — see the settings-driven signature in the
+  // spec).
+  const NOW = new Date(2026, 7, 31, 12, 0, 0);
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    requestUrl.mockReset();
+  });
+
+  function icsCal(...events: string[]): string {
+    return ['BEGIN:VCALENDAR', 'VERSION:2.0', ...events, 'END:VCALENDAR'].join('\r\n');
+  }
+
+  // One event that lands inside fetchIcsEvents' -2/+8 week window around NOW.
+  const IN_WINDOW_EVENT =
+    'BEGIN:VEVENT\r\nUID:standup\r\nSUMMARY:Standup\r\nDTSTART:20260901T090000Z\r\nDTEND:20260901T093000Z\r\nEND:VEVENT';
+
+  function serveIcs(body: string, status = 200) {
+    requestUrl.mockResolvedValue({ status, text: body });
+  }
+
+  it('merges Day Planner lines and calendar events into scheduled', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] 09:00 - 09:30 Fix badge alpha ⏳ 2026-09-01\n');
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    const repo = new VaultRepo(
+      app,
+      () => settings({ icsUrl: 'https://example.invalid/basic.ics' }),
+    );
+
+    const snap = await repo.readWeek(WEEK_START);
+
+    expect(snap.scheduled.map((e) => e.title)).toEqual(['Fix badge alpha', 'Standup']);
+    expect(snap.icsEvents.map((e) => e.title)).toEqual(['Standup']);
+    // ICS events ride at the tail, past every real vault line.
+    expect(snap.scheduledLines).toHaveLength(1);
+  });
+
+  it('skips the ICS merge entirely for a week whose frontmatter status is reviewed', async () => {
+    const { app, vault } = makeApp();
+    vault.seed(
+      'Weekly/2026-W36.md',
+      '---\nstatus: reviewed\n---\n\n## Tasks\n\n- [ ] Book dentist\n',
+    );
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    const repo = new VaultRepo(
+      app,
+      () => settings({ icsUrl: 'https://example.invalid/basic.ics' }),
+    );
+
+    const snap = await repo.readWeek(WEEK_START);
+
+    expect(snap.icsEvents).toEqual([]);
+    expect(snap.scheduled).toEqual([]);
+    expect(requestUrl).not.toHaveBeenCalled();
+  });
+
+  it('a planning/active/missing status still gets ICS (only "reviewed" is excluded)', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '---\nstatus: planning\n---\n\n## Tasks\n\n- [ ] Book dentist\n');
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    const repo = new VaultRepo(
+      app,
+      () => settings({ icsUrl: 'https://example.invalid/basic.ics' }),
+    );
+
+    const snap = await repo.readWeek(WEEK_START);
+    expect(snap.icsEvents.map((e) => e.title)).toEqual(['Standup']);
+  });
+
+  it('keeps ICS events out of scheduled (but still on icsEvents) when the busy toggle is off', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] 09:00 - 09:30 Fix badge alpha ⏳ 2026-09-01\n');
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    const repo = new VaultRepo(
+      app,
+      () => settings({ icsUrl: 'https://example.invalid/basic.ics', icsEventsBusy: false }),
+    );
+
+    const snap = await repo.readWeek(WEEK_START);
+
+    expect(snap.scheduled.map((e) => e.title)).toEqual(['Fix badge alpha']);
+    expect(snap.icsEvents.map((e) => e.title)).toEqual(['Standup']);
+  });
+
+  it('leaves the week readable when the calendar feed fails', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] Book dentist\n');
+    requestUrl.mockRejectedValue(new Error('network is down'));
+    const repo = new VaultRepo(
+      app,
+      () => settings({ icsUrl: 'https://example.invalid/basic.ics' }),
+    );
+
+    const snap = await repo.readWeek(WEEK_START);
+
+    expect(snap.icsEvents).toEqual([]);
+    expect(snap.tasks.map((t) => t.text)).toEqual(['- [ ] Book dentist']);
+    expect(snap.errors).toEqual([]);
+  });
+
+  it('does not call requestUrl at all when no icsUrl is configured', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] Book dentist\n');
+    const repo = new VaultRepo(app, () => settings());
+
+    const snap = await repo.readWeek(WEEK_START);
+
+    expect(snap.icsEvents).toEqual([]);
+    expect(requestUrl).not.toHaveBeenCalled();
+  });
+
+  // `readWeek` runs on every debounced vault change, so an uncached fetch here
+  // would put a request to the user's calendar provider on the wire every time
+  // they pause typing in *any* note. These three cover the cache that stops it.
+  it('re-reading the same week does not re-fetch the feed', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] Book dentist\n');
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    const repo = new VaultRepo(app, () => settings({ icsUrl: 'https://example.invalid/basic.ics' }));
+
+    const first = await repo.readWeek(WEEK_START);
+    const second = await repo.readWeek(WEEK_START);
+
+    expect(requestUrl).toHaveBeenCalledTimes(1);
+    expect(second.icsEvents.map((e) => e.uid)).toEqual(first.icsEvents.map((e) => e.uid));
+  });
+
+  it('goes back to the network once the cache has aged out', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] Book dentist\n');
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    const repo = new VaultRepo(app, () => settings({ icsUrl: 'https://example.invalid/basic.ics' }));
+
+    await repo.readWeek(WEEK_START);
+    vi.setSystemTime(new Date(NOW.getTime() + 61 * 60 * 1000));
+    await repo.readWeek(WEEK_START);
+
+    expect(requestUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it('changing the URL setting takes effect immediately rather than waiting out the cache', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] Book dentist\n');
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    let url = 'https://example.invalid/one.ics';
+    const repo = new VaultRepo(app, () => settings({ icsUrl: url }));
+
+    await repo.readWeek(WEEK_START);
+    url = 'https://example.invalid/two.ics';
+    await repo.readWeek(WEEK_START);
+
+    expect(requestUrl).toHaveBeenCalledTimes(2);
+  });
+
+  it('an explicit refresh bypasses the cache', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '## Tasks\n\n- [ ] Book dentist\n');
+    serveIcs(icsCal(IN_WINDOW_EVENT));
+    const repo = new VaultRepo(app, () => settings({ icsUrl: 'https://example.invalid/basic.ics' }));
+
+    await repo.readWeek(WEEK_START);
+    await repo.fetchIcsEvents(true);
+
+    expect(requestUrl).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('VaultRepo.readIcsLinks', () => {
+  it('finds a checkbox line carrying an [ics-uid::] marker', async () => {
+    const { app, vault } = makeApp();
+    vault.seed(
+      'Weekly/2026-W36.md',
+      '## Tasks\n\n- [ ] Dentist appointment [ics-uid:: cal-abc/123]\n',
+    );
+    const repo = new VaultRepo(app, () => settings());
+
+    const links = await repo.readIcsLinks();
+
+    expect(links).toEqual([
+      {
+        uid: 'cal-abc/123',
+        path: 'Weekly/2026-W36.md',
+        line: 2,
+        text: '- [ ] Dentist appointment [ics-uid:: cal-abc/123]',
+      },
+    ]);
+  });
+
+  it('finds the parenthesised (ics-uid:: …) flavour too', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '- [ ] Standup (ics-uid:: standup-2026)\n');
+    const repo = new VaultRepo(app, () => settings());
+
+    const links = await repo.readIcsLinks();
+    expect(links.map((l) => l.uid)).toEqual(['standup-2026']);
+  });
+
+  it('ignores a non-checkbox line mentioning the same marker text', async () => {
+    const { app, vault } = makeApp();
+    vault.seed(
+      'Weekly/2026-W36.md',
+      'Notes: the marker looks like [ics-uid:: not-a-task] but this line has no checkbox.\n' +
+        '- [ ] Real task [ics-uid:: real-uid]\n',
+    );
+    const repo = new VaultRepo(app, () => settings());
+
+    const links = await repo.readIcsLinks();
+    expect(links.map((l) => l.uid)).toEqual(['real-uid']);
+  });
+
+  it('respects excludeFolders', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '- [ ] Kept [ics-uid:: kept-uid]\n');
+    vault.seed('Templates/Skip.md', '- [ ] Skipped [ics-uid:: skipped-uid]\n');
+    const repo = new VaultRepo(app, () => settings({ excludeFolders: ['Templates'] }));
+
+    const links = await repo.readIcsLinks();
+    expect(links.map((l) => l.uid)).toEqual(['kept-uid']);
+  });
+
+  it('tolerates a file that fails to read, still returning links from the rest of the vault', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Weekly/2026-W36.md', '- [ ] Kept [ics-uid:: kept-uid]\n');
+    vault.seedUnreadable('Weekly/Broken.md');
+    const repo = new VaultRepo(app, () => settings());
+
+    const links = await repo.readIcsLinks();
+    expect(links.map((l) => l.uid)).toEqual(['kept-uid']);
   });
 });
 

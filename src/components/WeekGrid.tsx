@@ -8,6 +8,7 @@ import { proposalConflict, snapToGap } from '../lib/gaps';
 import { SNAP_MINUTES, snapToGrid } from '../lib/duration';
 import { parseTaskMeta } from '../lib/taskmeta';
 import { EventBlock, eventMinutes } from './EventBlock';
+import { IcsEventBlock, icsEventMinutes } from './IcsEventBlock';
 import { NowLine } from './NowLine';
 import { GhostBlock } from './GhostBlock';
 
@@ -76,6 +77,42 @@ export interface WeekGridProps {
   onResizeBlock: (uid: string, startMin: number, endMin: number) => void;
   /** Keyed on the proposal itself, as `onMoveProposal`. */
   onResizeProposal: (key: string, startMin: number, endMin: number) => void;
+  /**
+   * Read-only calendar-feed events (`snapshot.icsEvents`), drawn distinctly
+   * from `scheduled` and never resizable/re-timable/click-openable
+   * (see `IcsEventBlock`'s own doc comment). Optional, defaulting to `[]`, so
+   * every existing caller/test that predates this feature keeps compiling and
+   * rendering exactly as it did.
+   *
+   * When `icsEventsBusy` is on, the same event is *also* present in
+   * `scheduled` (so it still reserves a gap) — `WeekGrid` de-duplicates by uid
+   * so it is drawn exactly once, in its `IcsEventBlock` styling rather than a
+   * real block's, regardless of which array it happens to also be sitting in.
+   */
+  icsEvents?: CalEvent[];
+  /**
+   * An ICS event was dragged onto the rail — the one interaction a read-only
+   * calendar block supports (spec §2.4). `main.ts` turns this into a task
+   * line via `data/icsCapture.ts` and the same `appendUnderHeading` write path
+   * "Capture a task" already uses. Optional for the same reason `icsEvents`
+   * is: a caller that never passes any ICS events has nothing to drop.
+   */
+  onDropIcsToRail?: (ev: CalEvent) => void;
+  /**
+   * uids from `icsEvents` that already have a `[ics-uid::]` marker somewhere
+   * in the snapshot — i.e. already captured as a task (`WeekViewRoot` derives
+   * this from the task lines it already has, via `icsUidOf`). These are
+   * dropped from the *drawn* ICS block set — spec §2.4, point 3, "that event
+   * stops being drawn as an ICS block on the grid" — without touching
+   * `icsUidSet`'s own busy-dedup role below: a captured event's underlying
+   * feed entry can still be sitting in `scheduled` reserving a gap (the feed
+   * has no idea it was captured, so a refetch keeps returning it), and that
+   * reservation must still be excluded from `scheduled`'s own ordinary
+   * `EventBlock` rendering — that block's `uid` is the feed's own uid, not a
+   * `file:line`, so drawing it as an interactive real block would offer
+   * controls (`onUnschedule`, drag-to-retime) that resolve to nothing.
+   */
+  capturedIcsUids?: Set<string>;
 }
 
 interface DragState {
@@ -144,6 +181,12 @@ type DragKind =
   // A task dragged in from the rail — it has no block on the grid yet, so the
   // preview is drawn from nothing rather than moved from somewhere.
   | 'incoming'
+  // A read-only ICS block being dragged toward the rail. Its own kind
+  // rather than reusing `'event'`: it never re-times or moves within the
+  // grid (there is no `onMoveBlock`/`gaps` legality question for it at all),
+  // it has no click-opens-source behaviour, and it reports through a
+  // different callback (`onDropIcsToRail`) on drop.
+  | 'ics'
   | null;
 
 /** Grid quantum a resized edge snaps to, and — since a block can never be
@@ -291,8 +334,21 @@ export function WeekGrid({
   onSplit,
   onResizeBlock,
   onResizeProposal,
+  icsEvents = [],
+  onDropIcsToRail,
+  capturedIcsUids,
 }: WeekGridProps) {
   const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  // When `icsEventsBusy` is on, `vaultRepo.readWeek` pushes the same event
+  // into both `scheduled` (so it reserves a gap) and `icsEvents` (so it
+  // can still be drawn/dropped as an ICS block). Without this set, that event
+  // would render twice: once as an ordinary `EventBlock`, once as an
+  // `IcsEventBlock`. Filtering it out of `scheduled`'s own rendering below —
+  // while leaving it in `scheduled` for every *non*-drawing purpose (gap
+  // computation, conflict-checking) — is what keeps "reserves time" and "is
+  // drawn read-only" as the two independent facts the settings toggle says
+  // they are.
+  const icsUidSet = new Set(icsEvents.map((e) => e.uid));
   // -1..7ish when `now` isn't in this week at all — no column will match it,
   // which is exactly "no now-line" (WeekViewRoot: "only when `now` falls
   // inside the rendered week", computed here from `weekStart`/`now`, never
@@ -324,6 +380,14 @@ export function WeekGrid({
   const [incomingPreview, setIncomingPreview] = useState<{ day: number; startMin: number } | null>(
     null,
   );
+  // Dragging a read-only ICS block toward the rail. No preview state beyond
+  // "which uid is mid-drag": unlike every move-drag above, this
+  // block never repositions on the grid (see `DragKind`'s own doc comment on
+  // `'ics'`), so there is no day/startMin to track, only whether to dim it.
+  const icsDragRef = useRef<{ ev: CalEvent; startClientX: number; startClientY: number; moved: boolean } | null>(
+    null,
+  );
+  const [icsDraggingUid, setIcsDraggingUid] = useState<string | null>(null);
 
   function dayAt(clientX: number): number {
     let bestIdx = 0;
@@ -791,6 +855,47 @@ export function WeekGrid({
     }
   }
 
+  // --- Dragging a read-only ICS block onto the rail ------------------------
+  //
+  // The one gesture `IcsEventBlock` supports. Modelled on the move-drags
+  // above (pointer capture on down, tracked on `window` from then on, a 4px
+  // threshold telling a drag from a stray click) but deliberately smaller:
+  // there is no day/minute math, no `snapToGap`, no preview position, because
+  // the block never actually moves on the grid — it only ever leaves it
+  // (dropped on the rail) or stays exactly where it was (dropped anywhere
+  // else, which is simply not a drop this gesture recognises).
+
+  function handleIcsDragStart(ev: CalEvent, e: ReactPointerEvent<HTMLDivElement>) {
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    icsDragRef.current = { ev, startClientX: e.clientX, startClientY: e.clientY, moved: false };
+    setDragKind('ics');
+  }
+
+  function handleWindowIcsDragMove(e: PointerEvent) {
+    const drag = icsDragRef.current;
+    if (!drag) return;
+    const dx = e.clientX - drag.startClientX;
+    const dy = e.clientY - drag.startClientY;
+    if (!drag.moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    drag.moved = true;
+    setIcsDraggingUid(drag.ev.uid);
+  }
+
+  function handleWindowIcsDragEnd(e: PointerEvent) {
+    const drag = icsDragRef.current;
+    icsDragRef.current = null;
+    setDragKind(null);
+    setIcsDraggingUid(null);
+    if (!drag || !drag.moved) return;
+
+    // Anywhere but the rail is a cancelled drag, not a drop: this block has
+    // no other legal destination, so there is nothing to snap it to or
+    // refuse it from — it was never actually moved in the first place.
+    if (isOverRail?.(e.clientX, e.clientY)) {
+      onDropIcsToRail?.(drag.ev);
+    }
+  }
+
   // Wire pointermove/pointerup/pointercancel to `window` for exactly as long
   // as a drag (ghost or real block) is in progress, and nowhere else — a
   // listener left attached past the drag it belonged to is a leak, and in
@@ -859,6 +964,16 @@ export function WeekGrid({
         window.removeEventListener('pointercancel', handleWindowGhostResizeEnd);
       };
     }
+    if (dragKind === 'ics') {
+      window.addEventListener('pointermove', handleWindowIcsDragMove);
+      window.addEventListener('pointerup', handleWindowIcsDragEnd);
+      window.addEventListener('pointercancel', handleWindowIcsDragEnd);
+      return () => {
+        window.removeEventListener('pointermove', handleWindowIcsDragMove);
+        window.removeEventListener('pointerup', handleWindowIcsDragEnd);
+        window.removeEventListener('pointercancel', handleWindowIcsDragEnd);
+      };
+    }
     return undefined;
     // Only `dragKind` — every handler above closes over refs (mutated
     // synchronously at pointerdown, before `dragKind` ever flips) and props
@@ -882,9 +997,23 @@ export function WeekGrid({
 
       {days.map((day, di) => {
         const dayEvents = scheduled.filter(
-          (e) => !e.allDay && e.uid !== hiddenUid && eventDayOf(e) === di,
+          (e) => !e.allDay && e.uid !== hiddenUid && !icsUidSet.has(e.uid) && eventDayOf(e) === di,
         );
-        const allDay = scheduled.filter((e) => e.allDay && dayIndex(e.start, weekStart) === di);
+        const allDay = scheduled.filter(
+          (e) => e.allDay && !icsUidSet.has(e.uid) && dayIndex(e.start, weekStart) === di,
+        );
+        // Drawn from `icsEvents` itself, per the toggle's own doc comment
+        // (contract.ts): "always carried here regardless of the toggle,
+        // because the grid still needs to draw it". `scheduled` is only ever
+        // the busy-toggle's *reservation* signal now, never the draw source
+        // for one of these. `capturedIcsUids` additionally drops one already
+        // turned into a task — see this prop's own doc comment above.
+        const dayIcsEvents = icsEvents.filter(
+          (e) => !e.allDay && !capturedIcsUids?.has(e.uid) && dayIndex(e.start, weekStart) === di,
+        );
+        const dayIcsAllDay = icsEvents.filter(
+          (e) => e.allDay && !capturedIcsUids?.has(e.uid) && dayIndex(e.start, weekStart) === di,
+        );
         const dayBlocks = blocks.filter((b) => b.days.includes(di));
         const dayGaps = gapList.filter((g) => g.day === di);
         const dayProposals = proposals.filter((p) => positionOf(p).day === di);
@@ -904,6 +1033,18 @@ export function WeekGrid({
               <span className="weekfit-grid__date">{day.getDate()}</span>
               {allDay.map((e) => (
                 <span key={e.uid} className="weekfit-grid__chip" title={e.title}>
+                  {e.title}
+                </span>
+              ))}
+              {/* All-day calendar-feed events. Same chip, visually muted —
+                  read-only scenery, like every other all-day chip: neither
+                  kind has ever been draggable or clickable here. */}
+              {dayIcsAllDay.map((e) => (
+                <span
+                  key={e.uid}
+                  className="weekfit-grid__chip weekfit-grid__chip--ics"
+                  title={`${e.title} · from your calendar feed`}
+                >
                   {e.title}
                 </span>
               ))}
@@ -979,6 +1120,25 @@ export function WeekGrid({
                     onSplit={onSplit}
                     onDragStart={handleEventDragStart}
                     onResizeStart={handleEventResizeStart}
+                  />
+                );
+              })}
+
+              {/* Read-only calendar-feed blocks. Positioned with the
+                  same formula as a real block (`icsEventMinutes`, the ICS
+                  twin of `eventMinutes`), but never fed a drag preview: this
+                  block never repositions on the grid, only leaves it (dropped
+                  on the rail — see `handleWindowIcsDragEnd`). */}
+              {dayIcsEvents.map((e) => {
+                const pos = icsEventMinutes(e);
+                return (
+                  <IcsEventBlock
+                    key={e.uid}
+                    ev={e}
+                    startMin={pos.startMin}
+                    endMin={pos.endMin}
+                    dragging={icsDraggingUid === e.uid}
+                    onDragStart={handleIcsDragStart}
                   />
                 );
               })}

@@ -22,12 +22,14 @@ const {
   replaceChildSessions,
   createNote,
   setTaskDone,
+  updateIcsTaskRanges,
+  clearIcsUidMarkers,
 } = await import('../src/data/writer');
 const { TFile } = (await import('obsidian')) as unknown as { TFile: new (path: string) => any };
 const { addDays, startOfISOWeek } = await import('../src/lib/week');
 const { parse: parseYaml, stringify: stringifyYaml } = await import('yaml');
 import type { Proposal } from '../src/lib/gaps';
-import type { PlacementEdit } from '../src/data/contract';
+import type { IcsLink, PlacementEdit } from '../src/data/contract';
 
 // --- a minimal fake vault: just enough for `process` and `getAbstractFileByPath` ---
 
@@ -1097,5 +1099,159 @@ describe('createNote — the first-run seed', () => {
     const result = await createNote(app, 'Weekly/2026-W36.md', 'x');
     expect(result.written).toBe(0);
     expect(result.errors.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Applying an ICS delta
+// ---------------------------------------------------------------------------
+
+function icsLink(overrides: Partial<IcsLink> = {}): IcsLink {
+  return {
+    uid: 'cal-uid-1',
+    path: 'Weekly/2026-W36.md',
+    line: 0,
+    text: '- [ ] Dentist [ics-uid:: cal-uid-1]',
+    ...overrides,
+  };
+}
+
+describe('updateIcsTaskRanges', () => {
+  it('rewrites the leading range while keeping title, tags and the marker intact', async () => {
+    const { app, vault } = makeApp();
+    const original = '- [ ] 09:00 - 09:30 Dentist #health [ics-uid:: cal-uid-1]';
+    vault.seed('Weekly/2026-W36.md', `${original}\n`);
+
+    const result = await updateIcsTaskRanges(app, [
+      {
+        link: icsLink({ text: original }),
+        start: new Date(2026, 8, 2, 11, 0),
+        end: new Date(2026, 8, 2, 11, 45),
+      },
+    ]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].written).toBe(1);
+    expect(result[0].skipped).toEqual([]);
+    expect(result[0].errors).toEqual([]);
+
+    const line = vault.files.get('Weekly/2026-W36.md')!.split('\n')[0];
+    expect(line).toBe('- [ ] 11:00 - 11:45 Dentist #health [ics-uid:: cal-uid-1]');
+  });
+
+  it('keeps an inline-field-style [due::] alongside the marker untouched', async () => {
+    const { app, vault } = makeApp();
+    const original = '- [ ] 09:00 - 09:30 Dentist [due:: 2026-09-04] [ics-uid:: cal-uid-1]';
+    vault.seed('Weekly/2026-W36.md', `${original}\n`);
+
+    const result = await updateIcsTaskRanges(app, [
+      {
+        link: icsLink({ text: original }),
+        start: new Date(2026, 8, 2, 10, 0),
+        end: new Date(2026, 8, 2, 10, 30),
+      },
+    ]);
+
+    expect(result[0].written).toBe(1);
+    const line = vault.files.get('Weekly/2026-W36.md')!.split('\n')[0];
+    expect(line).toBe('- [ ] 10:00 - 10:30 Dentist [due:: 2026-09-04] [ics-uid:: cal-uid-1]');
+  });
+
+  it('refuses a line the user has edited by hand since it was read', async () => {
+    const { app, vault } = makeApp();
+    const nowOnDisk = '- [ ] 09:00 - 09:30 Dentist (moved by hand) [ics-uid:: cal-uid-1]';
+    vault.seed('Weekly/2026-W36.md', `${nowOnDisk}\n`);
+    const staleLink = icsLink({ text: '- [ ] 09:00 - 09:30 Dentist [ics-uid:: cal-uid-1]' });
+
+    const result = await updateIcsTaskRanges(app, [
+      { link: staleLink, start: new Date(2026, 8, 2, 11, 0), end: new Date(2026, 8, 2, 11, 30) },
+    ]);
+
+    expect(result[0].written).toBe(0);
+    expect(result[0].skipped).toEqual([
+      { key: 'Weekly/2026-W36.md:0', title: 'Dentist', reason: 'line-changed' },
+    ]);
+    expect(vault.files.get('Weekly/2026-W36.md')).toBe(`${nowOnDisk}\n`);
+  });
+
+  it('reports one WriteResult per update, in order', async () => {
+    const { app, vault } = makeApp();
+    vault.seed(
+      'Weekly/2026-W36.md',
+      '- [ ] 09:00 - 09:30 A [ics-uid:: a]\n- [ ] 08:00 - 08:15 B [ics-uid:: b]\n',
+    );
+
+    const results = await updateIcsTaskRanges(app, [
+      {
+        link: icsLink({ uid: 'a', line: 0, text: '- [ ] 09:00 - 09:30 A [ics-uid:: a]' }),
+        start: new Date(2026, 8, 2, 12, 0),
+        end: new Date(2026, 8, 2, 12, 30),
+      },
+      {
+        link: icsLink({ uid: 'b', line: 1, text: '- [ ] 08:00 - 08:15 B [ics-uid:: b]' }),
+        start: new Date(2026, 8, 2, 13, 0),
+        end: new Date(2026, 8, 2, 13, 15),
+      },
+    ]);
+
+    expect(results).toHaveLength(2);
+    expect(results.every((r) => r.written === 1)).toBe(true);
+    const lines = vault.files.get('Weekly/2026-W36.md')!.split('\n');
+    expect(lines[0]).toBe('- [ ] 12:00 - 12:30 A [ics-uid:: a]');
+    expect(lines[1]).toBe('- [ ] 13:00 - 13:15 B [ics-uid:: b]');
+  });
+});
+
+describe('clearIcsUidMarkers', () => {
+  it('strips the marker cleanly, leaving no double space and the task line intact', async () => {
+    const { app, vault } = makeApp();
+    const original = '- [ ] 11:00 - 11:45 Dentist #health [ics-uid:: cal-uid-1]';
+    vault.seed('Weekly/2026-W36.md', `${original}\n`);
+
+    const result = await clearIcsUidMarkers(app, [icsLink({ text: original })]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].written).toBe(1);
+    expect(result[0].skipped).toEqual([]);
+
+    const line = vault.files.get('Weekly/2026-W36.md')!.split('\n')[0];
+    expect(line).toBe('- [ ] 11:00 - 11:45 Dentist #health');
+    expect(line).not.toMatch(/ {2,}/); // no leftover double space
+  });
+
+  it('strips the parenthesised (ics-uid:: …) flavour too', async () => {
+    const { app, vault } = makeApp();
+    const original = '- [ ] Standup (ics-uid:: standup-2026)';
+    vault.seed('Weekly/2026-W36.md', `${original}\n`);
+
+    await clearIcsUidMarkers(app, [icsLink({ text: original })]);
+    const line = vault.files.get('Weekly/2026-W36.md')!.split('\n')[0];
+    expect(line).toBe('- [ ] Standup');
+  });
+
+  it('does not delete the task line, only the marker', async () => {
+    const { app, vault } = makeApp();
+    const original = '- [ ] Dentist [ics-uid:: cal-uid-1]';
+    vault.seed('Weekly/2026-W36.md', `${original}\nOther line stays\n`);
+
+    await clearIcsUidMarkers(app, [icsLink({ text: original })]);
+    const lines = vault.files.get('Weekly/2026-W36.md')!.split('\n');
+    expect(lines[0]).toBe('- [ ] Dentist');
+    expect(lines[1]).toBe('Other line stays');
+  });
+
+  it('refuses a line that no longer matches, rather than guessing which marker to strip', async () => {
+    const { app, vault } = makeApp();
+    const nowOnDisk = '- [ ] Dentist (rebooked) [ics-uid:: cal-uid-1]';
+    vault.seed('Weekly/2026-W36.md', `${nowOnDisk}\n`);
+    const staleLink = icsLink({ text: '- [ ] Dentist [ics-uid:: cal-uid-1]' });
+
+    const result = await clearIcsUidMarkers(app, [staleLink]);
+
+    expect(result[0].written).toBe(0);
+    expect(result[0].skipped).toEqual([
+      { key: 'Weekly/2026-W36.md:0', title: 'Dentist', reason: 'line-changed' },
+    ]);
+    expect(vault.files.get('Weekly/2026-W36.md')).toBe(`${nowOnDisk}\n`);
   });
 });

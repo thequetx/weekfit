@@ -1,6 +1,6 @@
 {
   "name": "weekfit",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "Press one button and see where the week's work fits.",
@@ -14,6 +14,7 @@
     "check:vendored": "node scripts/check-vendored.mjs"
   },
   "dependencies": {
+    "ical.js": "^2.2.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -24,7 +25,6 @@
     "@types/react": "^18.3.31",
     "@types/react-dom": "^18.3.7",
     "esbuild": "^0.28.2",
-    "ical.js": "^2.2.1",
     "jsdom": "^30.0.1",
     "obsidian": "^1.13.1",
     "typescript": "^7.0.2",

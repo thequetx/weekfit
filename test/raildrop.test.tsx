@@ -145,3 +145,43 @@ describe('dragging back onto the rail', () => {
     expect(onUnschedule).not.toHaveBeenCalled();
   });
 });
+
+describe('dragging a read-only ICS event onto the rail', () => {
+  // The one interaction a calendar-feed block supports. Modelled
+  // on the real-block "dragging back onto the rail" suite above, but there is
+  // no "drop inside the grid is still a move" counterpart here — an ICS block
+  // never moves on the grid at all (see `WeekGrid`'s `'ics'` DragKind doc
+  // comment), so a drop anywhere but the rail is simply not recognised.
+  it('drops onto the rail and reports the CalEvent, not a re-time', () => {
+    const onDropIcsToRail = vi.fn();
+    const onMoveBlock = vi.fn();
+    const ics = calEvent({ uid: 'cal-uid-9', title: 'Dentist' });
+    const { container } = render(
+      <WeekGrid {...baseProps({ icsEvents: [ics], onDropIcsToRail, onMoveBlock, isOverRail })} />,
+    );
+
+    const block = container.querySelector('.weekfit-ev--ics') as HTMLElement;
+    expect(block).toBeTruthy();
+    fireEvent.pointerDown(block, { clientX: 50, clientY: 300, pointerId: 1 });
+    windowPointer('pointermove', 950, 300); // out over the rail
+    windowPointer('pointerup', 950, 300);
+
+    expect(onDropIcsToRail).toHaveBeenCalledWith(ics);
+    expect(onMoveBlock).not.toHaveBeenCalled();
+  });
+
+  it('released back inside the grid, nothing fires — the block was never actually movable', () => {
+    const onDropIcsToRail = vi.fn();
+    const ics = calEvent({ uid: 'cal-uid-10' });
+    const { container } = render(
+      <WeekGrid {...baseProps({ icsEvents: [ics], onDropIcsToRail, isOverRail })} />,
+    );
+
+    const block = container.querySelector('.weekfit-ev--ics') as HTMLElement;
+    fireEvent.pointerDown(block, { clientX: 50, clientY: 300, pointerId: 1 });
+    windowPointer('pointermove', 120, 340);
+    windowPointer('pointerup', 120, 340);
+
+    expect(onDropIcsToRail).not.toHaveBeenCalled();
+  });
+});

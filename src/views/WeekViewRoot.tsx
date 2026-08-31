@@ -5,7 +5,8 @@
 import { useRef, useState } from 'react';
 import type { FitState, WeekSnapshot, WeekfitSettings, WriteResult } from '../data/contract';
 import { fmtWeekRange } from '../lib/week';
-import type { VaultTask } from '../lib/types';
+import type { CalEvent, VaultTask } from '../lib/types';
+import { icsUidOf } from '../data/icsCapture';
 import { WeekGrid } from '../components/WeekGrid';
 import { IntentionsRail } from '../components/IntentionsRail';
 import { CapacityLine } from '../components/CapacityLine';
@@ -73,6 +74,10 @@ export interface WeekViewRootProps {
   // --- Edge-drag resize: top edge re-times start, bottom edge re-times end -
   onResizeBlock: (uid: string, startMin: number, endMin: number) => void;
   onResizeProposal: (groupKey: string, startMin: number, endMin: number) => void;
+  // --- Read-only calendar-feed events ---------------------------------------
+  /** A read-only ICS block was dragged onto the rail — turns it into a task.
+   *  See `WeekGrid`'s `onDropIcsToRail` for the gesture itself. */
+  onDropIcsToRail: (ev: CalEvent) => void;
 }
 
 /**
@@ -138,6 +143,7 @@ export function WeekViewRoot({
   onOpenSource,
   onResizeBlock,
   onResizeProposal,
+  onDropIcsToRail,
 }: WeekViewRootProps) {
   // A single hook, called on every render regardless of which branch below
   // fires — the loading branch returns early, but only after this runs, so
@@ -169,6 +175,19 @@ export function WeekViewRoot({
   }
 
   const unscheduledSource = [...snapshot.tasks, ...snapshot.thisweek];
+  // An ICS event already captured as a task (a `[ics-uid::]` marker sitting
+  // on some line in the snapshot) must stop being drawn as a read-only
+  // calendar block once that happens, even though a fresh fetch of the feed
+  // itself keeps returning the very same event unchanged. The feed has no
+  // idea a task now exists for it; the vault does, so this reads it off the
+  // lines the snapshot already carries rather
+  // than doing a second vault sweep just to ask the question `readIcsLinks`
+  // (vaultRepo.ts) already answers for the refresh command itself.
+  const capturedIcsUids = new Set(
+    [...snapshot.intentions, ...snapshot.tasks, ...snapshot.thisweek, ...snapshot.scheduledLines]
+      .map((t) => icsUidOf(t.text))
+      .filter((uid): uid is string => uid != null),
+  );
   const showErrors = snapshot.errors.length > 0 && !errorsDismissed;
   // A fit that placed nothing is still a result — but it is not ghosts, and
   // the controls have to tell those apart.
@@ -353,6 +372,9 @@ export function WeekViewRoot({
           onOpenSource={onOpenSource}
           onResizeBlock={onResizeBlock}
           onResizeProposal={onResizeProposal}
+          icsEvents={snapshot.icsEvents}
+          capturedIcsUids={capturedIcsUids}
+          onDropIcsToRail={onDropIcsToRail}
           incoming={incoming}
           onIncomingEnd={() => setIncoming(null)}
           isOverRail={isOverRail}

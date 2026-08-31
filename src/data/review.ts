@@ -105,6 +105,16 @@ export function computeReview(
   let plannedMin = 0;
   let keptMin = 0;
   snapshot.scheduled.forEach((ev, i) => {
+    // `scheduled` can run longer than `scheduledLines` — ICS events are
+    // appended past the end of it (see the field doc on
+    // `WeekSnapshot.scheduledLines` in contract.ts), specifically so an index
+    // past the vault lines finds "no matching line" rather than the wrong one.
+    // Without this guard, a calendar feed's own busy time got counted into
+    // `plannedMin`/`hours_planned` even though nobody asked this plugin to
+    // plan it — it's the user's existing commitment, not a task the review
+    // should grade. Only a block that actually came from a vault line — one
+    // this plugin (or the user) could plan and later mark done — counts here.
+    if (!snapshot.scheduledLines[i]) return;
     const minutes = Math.max(0, Math.round((ev.end.getTime() - ev.start.getTime()) / 60000));
     plannedMin += minutes;
     if (snapshot.scheduledLines[i]?.done) keptMin += minutes;

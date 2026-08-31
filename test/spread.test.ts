@@ -33,6 +33,7 @@ function week(strategy: 'spread' | 'earliest'): {
       thisweek: [],
       scheduled: [],
       scheduledLines: [],
+      icsEvents: [],
       errors: [],
     },
     settings: {

@@ -56,10 +56,64 @@ export interface WeekSnapshot {
    * every such edit would be refused as `line-changed`.
    */
   scheduledLines: VaultTask[];
+  /**
+   * Every ICS event fetched for this week, whether or not it also went into
+   * `scheduled`. It always goes into `scheduled` when
+   * `icsEventsBusy` is on — that's what makes it reserve a gap. It is *always*
+   * carried here regardless of the toggle, because the grid still needs to
+   * draw it (as a non-reserving event) when busy is off, and because a
+   * consumer wanting "every calendar event this week" for its own reasons
+   * shouldn't have to reach into `scheduled` and guess which entries came from
+   * the feed. `[]` when there's no feed configured, the feed failed, or the
+   * week's frontmatter `status` is `reviewed` (no ICS merge for a closed week).
+   */
+  icsEvents: CalEvent[];
   /** Non-fatal read problems — a malformed date, an unreadable file. Surfaced
    *  once in the view rather than thrown, because a bad line in one note must
    *  never stop the week from rendering. */
   errors: string[];
+}
+
+// ---------------------------------------------------------------------------
+// ICS delta tracking (data layer only; no UI here)
+// ---------------------------------------------------------------------------
+
+/** One tracked event as of the last successful refresh. Persisted in the
+ *  plugin's own data.json (NOT a vault file — see `WeekfitSettings.icsState`
+ *  above). */
+export interface IcsEventSnapshot {
+  title: string;
+  timeStart: string; // ISO 8601
+  timeEnd: string; // ISO 8601
+  hash: string;
+}
+
+/** Keyed by the `[ics-uid:: …]` value carried on the task line. */
+export type IcsState = Record<string, IcsEventSnapshot>;
+
+export interface IcsDelta {
+  unchanged: string[]; // uids
+  updated: Array<{
+    uid: string;
+    title: string; // the title on the task line's snapshot (for display)
+    newTitle: string;
+    oldStart: string;
+    oldEnd: string;
+    newStart: string;
+    newEnd: string;
+  }>;
+  removed: Array<{ uid: string; title: string }>;
+}
+
+/** One `[ics-uid:: …]` (or `(ics-uid:: …)`) marker found on a checkbox line —
+ *  the vault-side half of the link between a task and a tracked calendar
+ *  event. `text` is the whole raw line, same convention as `VaultTask.text`,
+ *  so a writer can verify it hasn't changed before touching it. */
+export interface IcsLink {
+  uid: string;
+  path: string;
+  line: number;
+  text: string;
 }
 
 /** Where the adapter looks for a task's home note. */
@@ -106,6 +160,37 @@ export interface WeekfitSettings {
    * rather than front-loaded.
    */
   fitStrategy: 'spread' | 'earliest';
+  /**
+   * A read-only iCalendar feed URL (spec §1.4) — `https://…/basic.ics`, the
+   * kind of link most calendar providers publish. `''` means no feed
+   * configured, which is a normal state, not an error: everything ICS-shaped
+   * is simply skipped.
+   */
+  icsUrl: string;
+  /**
+   * Spec §2.3. On: calendar events block scheduling gaps like any other
+   * commitment, going into both `WeekSnapshot.scheduled` and `.icsEvents`. Off:
+   * they're still fetched and shown (via `.icsEvents`), but never reserve
+   * time — they're informational only.
+   */
+  icsEventsBusy: boolean;
+  /**
+   * Epoch ms of the last successful (or attempted) calendar fetch. Used to
+   * rate-limit refreshes (see `ICS_REFRESH_RATE_LIMIT_MS` in main.ts) so a
+   * slow or misbehaving feed can't be hammered on every render.
+   */
+  icsLastRefresh: number;
+  /**
+   * The last-known snapshot of every tracked calendar event, keyed by its
+   * `[ics-uid::]` marker. This is deliberately **not** a vault file: a
+   * `.weekfit/ics-state.json` was the obvious place, but Obsidian's
+   * directory reviewers flag plugins that create dot-folders in the vault
+   * root or reach for `vault.adapter` directly, and `saveData`/`loadData`
+   * (which this plugin already uses for every other setting) is the
+   * sanctioned store for exactly this kind of plugin-private state — no new
+   * IO layer needed. So it lives here, in `data.json`, instead.
+   */
+  icsState: IcsState;
 }
 
 export const DEFAULT_SETTINGS: WeekfitSettings = {
@@ -129,6 +214,12 @@ export const DEFAULT_SETTINGS: WeekfitSettings = {
   // Front-loading is what the raw engine does and it is rarely what anyone
   // wants to look at, so the balanced pass is the default.
   fitStrategy: 'spread',
+  icsUrl: '',
+  // Calendar events are real commitments by default — the toggle is there
+  // for the person who wants them visible but not competing for gaps.
+  icsEventsBusy: true,
+  icsLastRefresh: 0,
+  icsState: {},
 };
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import type {
   WeekfitSettings,
   WriteResult,
 } from '../data/contract';
+import type { CalEvent } from '../lib/types';
 import { startOfISOWeek } from '../lib/week';
 
 export const VIEW_TYPE_WEEK = 'weekfit-week-view';
@@ -53,6 +54,8 @@ export interface WeekViewState {
   onOpenSource: (uid: string) => void;
   onResizeBlock: (uid: string, startMin: number, endMin: number) => void;
   onResizeProposal: (groupKey: string, startMin: number, endMin: number) => void;
+  // --- Read-only calendar-feed events ---------------------------------------
+  onDropIcsToRail: (ev: CalEvent) => void;
 }
 
 const noop = () => {};
@@ -97,6 +100,7 @@ const INITIAL_STATE: WeekViewState = {
   onOpenSource: noop,
   onResizeBlock: noop,
   onResizeProposal: noop,
+  onDropIcsToRail: noop,
 };
 
 /**

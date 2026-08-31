@@ -10,6 +10,7 @@ import { DAY_PLANNER_RE, formatSource } from '../lib/source';
 import { parseTaskMeta, taskTitle } from '../lib/taskmeta';
 import { dayIndex } from '../lib/week';
 import type { CalEvent, VaultTask } from '../lib/types';
+import type { IcsLink } from './contract';
 
 // ---------------------------------------------------------------------------
 // Shared line-level helpers
@@ -209,6 +210,43 @@ export function sweepTagged(content: string, file: string, tag: string): VaultTa
 }
 
 // ---------------------------------------------------------------------------
+// findIcsLinks — the vault side of the calendar-import delta
+// ---------------------------------------------------------------------------
+
+/**
+ * Dataview inline-field syntax for the marker a converted calendar event
+ * leaves on its task line: `[ics-uid:: <value>]`, or the parenthesised
+ * `(ics-uid:: <value>)` — Dataview accepts either bracket flavour on read, so
+ * this tolerates both rather than assuming the one this plugin happens to
+ * write. The value may itself contain `/` and `-` (an iCalendar UID commonly
+ * does), so the capture is "anything but the closing bracket", not a strict
+ * character class.
+ */
+const ICS_UID_RE = /[[(]\s*ics-uid\s*::\s*([^\])]+?)\s*[\])]/i;
+
+/**
+ * Checkbox lines anywhere in `content` carrying an `[ics-uid::]` marker —
+ * same shape as `sweepTagged` (whole-file scan, fenced code and comments
+ * excluded, checkbox lines only), but matching an inline field rather than a
+ * `#tag`. A marker on a non-checkbox line (a stray mention in prose) is never
+ * matched, because only `CHECKBOX_LINE_RE` lines are considered at all.
+ */
+export function findIcsLinks(content: string, file: string): IcsLink[] {
+  const lines = splitLines(content);
+  const fenced = skipMask(lines);
+
+  const out: IcsLink[] = [];
+  lines.forEach((line, i) => {
+    if (fenced[i]) return;
+    if (!CHECKBOX_LINE_RE.test(line)) return;
+    const m = ICS_UID_RE.exec(line);
+    if (!m) return;
+    out.push({ uid: m[1].trim(), path: file, line: i, text: line });
+  });
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // scheduledEvents
 // ---------------------------------------------------------------------------
 
@@ -288,6 +326,16 @@ export function scheduledEvents(
     }
 
     if (!day) {
+      // A line carrying an `[ics-uid::]` marker is deliberately undated —
+      // `icsCaptureLine` (icsCapture.ts) writes it that way on purpose, so a
+      // calendar event dropped onto the rail lands unscheduled rather than
+      // silently landing on a day nobody chose. Counting it here would raise
+      // the "N timed lines have no date" banner on the very line the plugin
+      // just wrote for the user, which isn't a real problem to report — it's
+      // still a real task, still visible in the rail, and still becomes a
+      // block the moment it's given a day (drag, or "Fit this week"). Reuse
+      // the same pattern `findIcsLinks` matches rather than a second copy.
+      if (ICS_UID_RE.test(body)) return;
       unresolved++;
       return;
     }

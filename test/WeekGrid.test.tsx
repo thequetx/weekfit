@@ -939,3 +939,176 @@ describe('WeekGrid — conflict marking', () => {
     expect(ghost.className).toContain('weekfit-ghost');
   });
 });
+
+describe('WeekGrid — read-only ICS events', () => {
+  const yFor = (min: number) => ((min - 300) / 60) * 46;
+
+  it('draws an icsEvents entry with the distinguishing class, read-only', () => {
+    const ics = calEvent({
+      uid: 'cal-uid-1',
+      title: 'Dentist',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(<WeekGrid {...baseProps({ icsEvents: [ics] })} />);
+    installGeometry(container);
+
+    const block = container.querySelector('.weekfit-ev--ics') as HTMLElement;
+    expect(block).toBeTruthy();
+    expect(block.textContent).toContain('Dentist');
+    // Read-only: none of a real block's controls exist on it.
+    expect(block.querySelector('.weekfit-ev__unschedule')).toBeNull();
+    expect(block.querySelector('.weekfit-resize--top')).toBeNull();
+    expect(block.querySelector('.weekfit-resize--bottom')).toBeNull();
+    expect(block.querySelector('.weekfit-ev__split')).toBeNull();
+  });
+
+  it('when the same event is also in `scheduled` (busy toggle on), it is drawn exactly once', () => {
+    const ics = calEvent({
+      uid: 'cal-uid-2',
+      title: 'Standup',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 9, 30),
+    });
+    // Mirrors what `vaultRepo.readWeek` does when `icsEventsBusy` is on: the
+    // same uid appears in both `scheduled` and `icsEvents`.
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ics], icsEvents: [ics] })} />,
+    );
+    installGeometry(container);
+
+    expect(container.querySelectorAll('[aria-label*="Standup"]')).toHaveLength(1);
+    // And drawn in its ICS styling, not as an ordinary committed block.
+    expect(container.querySelector('.weekfit-ev--ics')).toBeTruthy();
+    expect(container.querySelector('.weekfit-ev:not(.weekfit-ev--ics)')).toBeNull();
+  });
+
+  it('when busy is off (event only in icsEvents), it still renders and stays out of the ordinary block list', () => {
+    const ics = calEvent({
+      uid: 'cal-uid-3',
+      title: 'Lunch',
+      start: dateAt(WEDNESDAY, 12, 0),
+      end: dateAt(WEDNESDAY, 13, 0),
+    });
+    const { container } = render(<WeekGrid {...baseProps({ scheduled: [], icsEvents: [ics] })} />);
+    installGeometry(container);
+
+    expect(container.querySelector('.weekfit-ev--ics')).toBeTruthy();
+  });
+
+  it('dragging an ICS block onto the rail calls onDropIcsToRail with the event', () => {
+    const onDropIcsToRail = vi.fn();
+    const onMoveBlock = vi.fn();
+    const ics = calEvent({
+      uid: 'cal-uid-4',
+      title: 'Team offsite',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const isOverRail = (x: number) => x >= 900;
+    const { container } = render(
+      <WeekGrid
+        {...baseProps({ icsEvents: [ics], onDropIcsToRail, onMoveBlock, isOverRail })}
+      />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev--ics') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 950, BODY_TOP + yFor(540));
+    windowPointer('pointerup', 950, BODY_TOP + yFor(540));
+
+    expect(onDropIcsToRail).toHaveBeenCalledTimes(1);
+    expect(onDropIcsToRail).toHaveBeenCalledWith(ics);
+    // There is no "move" for an ICS block — only the rail-drop.
+    expect(onMoveBlock).not.toHaveBeenCalled();
+  });
+
+  it('dropping an ICS block back inside the grid (not the rail) is a no-op — it never moves', () => {
+    const onDropIcsToRail = vi.fn();
+    const onMoveBlock = vi.fn();
+    const ics = calEvent({
+      uid: 'cal-uid-5',
+      title: 'Team offsite',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const isOverRail = (x: number) => x >= 900;
+    const { container } = render(
+      <WeekGrid
+        {...baseProps({ icsEvents: [ics], onDropIcsToRail, onMoveBlock, isOverRail })}
+      />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev--ics') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 260, BODY_TOP + yFor(600)); // still over the grid
+    windowPointer('pointerup', 260, BODY_TOP + yFor(600));
+
+    expect(onDropIcsToRail).not.toHaveBeenCalled();
+    expect(onMoveBlock).not.toHaveBeenCalled();
+  });
+
+  it('a uid in capturedIcsUids is not drawn as an ICS block at all', () => {
+    const ics = calEvent({
+      uid: 'cal-uid-7',
+      title: 'Already captured',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid
+        {...baseProps({ icsEvents: [ics], capturedIcsUids: new Set(['cal-uid-7']) })}
+      />,
+    );
+    installGeometry(container);
+
+    expect(container.querySelector('.weekfit-ev--ics')).toBeNull();
+  });
+
+  it('a captured uid still busy in `scheduled` is not drawn as an ordinary interactive block either', () => {
+    // The feed has no idea the event was captured, so a refetch (busy=on)
+    // still pushes it into `scheduled` reserving the same slot — but that
+    // synthetic uid (the feed's own uid, not `file:line`) must never render
+    // as an ordinary EventBlock, since none of its controls would resolve to
+    // a real line.
+    const ics = calEvent({
+      uid: 'cal-uid-8',
+      title: 'Already captured',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid
+        {...baseProps({
+          scheduled: [ics],
+          icsEvents: [ics],
+          capturedIcsUids: new Set(['cal-uid-8']),
+        })}
+      />,
+    );
+    installGeometry(container);
+
+    expect(container.querySelector('.weekfit-ev')).toBeNull();
+  });
+
+  it('a click with no movement does nothing — there is no source line to open', () => {
+    const onDropIcsToRail = vi.fn();
+    const ics = calEvent({
+      uid: 'cal-uid-6',
+      start: dateAt(WEDNESDAY, 9, 0),
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const { container } = render(
+      <WeekGrid {...baseProps({ icsEvents: [ics], onDropIcsToRail })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev--ics') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, 100));
+    windowPointer('pointerup', 250, 100);
+
+    expect(onDropIcsToRail).not.toHaveBeenCalled();
+  });
+});

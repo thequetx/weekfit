@@ -108,6 +108,7 @@ function snapshot(over: Partial<WeekSnapshot> = {}): WeekSnapshot {
     thisweek: [],
     scheduled: [],
     scheduledLines: [],
+    icsEvents: [],
     errors: [],
     ...over,
   };
@@ -154,6 +155,29 @@ describe('computeReview', () => {
     );
     expect(r.hoursPlanned).toBe(2);
     expect(r.hoursKept).toBe(1.5);
+  });
+
+  // Bug found while adding ICS support: `scheduled` can run longer than
+  // `scheduledLines` once ICS events are appended past the end of it (see
+  // the field doc on `WeekSnapshot.scheduledLines`). Before the guard in
+  // `computeReview`, this loop indexed `scheduledLines[i]` for every entry in
+  // `scheduled` — including the ICS tail — which either landed on the wrong
+  // vault line (a false `done` match) or `undefined` (harmless there, but the
+  // ICS event's own minutes were still being added to `plannedMin`
+  // regardless). A calendar feed the user never asked this plugin to plan
+  // should never inflate `hours_planned`.
+  it('does not count an ICS event appended past scheduledLines into plannedMin', () => {
+    const r = computeReview(
+      snapshot({
+        scheduled: [ev(0, 9 * 60, 60, 'vault-line'), ev(1, 14 * 60, 45, 'ics-event')],
+        // Only one real vault line — the second `scheduled` entry is the ICS
+        // event appended past the end of `scheduledLines`.
+        scheduledLines: [task('- [ ] A', { line: 1 })],
+      }),
+      settings,
+      NOW,
+    );
+    expect(r.hoursPlanned).toBe(1); // 60m from the vault line only, not +45m from ICS
   });
 
   it('excludes done tasks from unfinished', () => {

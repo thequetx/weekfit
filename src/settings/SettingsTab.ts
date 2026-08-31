@@ -17,6 +17,14 @@ import type { AvailabilityWindow, SkeletonBlock } from '../lib/types';
 export interface WeekfitPluginLike extends Plugin {
   settings: WeekfitSettings;
   saveSettings(): Promise<void>;
+  /**
+   * The same handler "Refresh calendar feed" (the command) calls.
+   * Extracted onto the plugin so Settings' "Refresh now" button invokes it
+   * rather than growing a second copy of the rate-limit/delta/modal flow —
+   * it already covers the no-URL case with its own Notice, so this button
+   * needs no separate disabled state to say the same thing.
+   */
+  refreshIcsFeed(): Promise<void>;
 }
 
 const NOTE_MODE_LABELS: Record<NoteMode, string> = {
@@ -75,6 +83,19 @@ function fmtHHMM(min: number): string {
   const h = Math.floor(min / 60) % 24;
   const m = ((min % 60) + 60) % 60;
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** A basic `http(s)://` sanity check for the calendar feed URL — not full
+ *  RFC validation (Obsidian's own text input doesn't offer that either), just
+ *  enough to catch a pasted note title or an empty scheme before it's saved
+ *  and silently fails every fetch. */
+function isHttpUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    return u.protocol === 'http:' || u.protocol === 'https:';
+  } catch {
+    return false;
+  }
 }
 
 /** A small red line under a settings row, toggled on/off imperatively so a
@@ -277,10 +298,73 @@ export class SettingsTab extends PluginSettingTab {
         });
       });
 
+    // --- calendar feed ----------------------------------------------------
+    this.renderCalendarSection(containerEl);
+
     // --- Phase 2: the engine's inputs -----------------------------------
     this.renderBlocksSection(containerEl);
     this.renderWindowsSection(containerEl);
     this.renderDurationsSection(containerEl);
+  }
+
+  /** The plugin's one calendar setting: a read-only ICS feed URL, and whether
+   *  it should compete for gaps or just be shown. Nothing here writes back to
+   *  the feed — Weekfit only ever reads it. */
+  private renderCalendarSection(containerEl: HTMLElement): void {
+    const settings = this.plugin.settings;
+    new Setting(containerEl).setName('Calendar feed').setHeading();
+
+    const urlRow = new Setting(containerEl)
+      .setName('Calendar feed URL')
+      .setDesc(
+        'A read-only iCalendar (.ics) link, the kind most calendar providers publish for ' +
+          'subscribing elsewhere — in Google Calendar: Settings → Settings for my calendars ' +
+          '→ [your calendar] → Integrate calendar → Secret address in iCal format. Optional ' +
+          '— leave empty to skip calendar events entirely. Weekfit only ever reads this ' +
+          'feed; it never writes to it.',
+      );
+    const showUrlError = errorSlot(urlRow.settingEl);
+    urlRow.addText((t) => {
+      t.setPlaceholder('https://…/basic.ics');
+      t.setValue(settings.icsUrl);
+      t.onChange(async (value) => {
+        const trimmed = value.trim();
+        if (trimmed && !isHttpUrl(trimmed)) {
+          showUrlError('Enter a valid http:// or https:// URL, or leave it empty.');
+          return;
+        }
+        showUrlError(null);
+        settings.icsUrl = trimmed;
+        await this.plugin.saveSettings();
+      });
+    });
+
+    new Setting(containerEl)
+      .setName('Treat calendar events as busy')
+      .setDesc(
+        'Calendar events block scheduling gaps. Turn off to show them without reserving time.',
+      )
+      .addToggle((tg) => {
+        tg.setValue(settings.icsEventsBusy);
+        tg.onChange(async (value) => {
+          settings.icsEventsBusy = value;
+          await this.plugin.saveSettings();
+        });
+      });
+
+    // Fetch and reconcile right now, rather than waiting for the
+    // command palette or the next hourly window. `refreshIcsFeed` already
+    // covers "no URL set" with its own Notice, so this button is never
+    // disabled — pressing it with nothing configured just says so.
+    new Setting(containerEl)
+      .setName('Refresh now')
+      .setDesc(
+        'Fetch the feed and reconcile any changes immediately, instead of waiting for the next automatic check.',
+      )
+      .addButton((b) => {
+        b.setButtonText('Refresh now');
+        b.onClick(() => void this.plugin.refreshIcsFeed());
+      });
   }
 
   /** Recurring commitments — gym, a stream, a standing meeting. Drawn behind
