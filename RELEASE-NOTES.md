@@ -1,4 +1,13 @@
-First release.
+## 0.2.0
+
+**Calendar sync.** Add one read-only iCalendar (.ics) feed URL in Settings and its events show up on the grid, right alongside everything else. By default they block scheduling gaps too — Fit this week won't propose a slot your calendar already has claimed — with a toggle if you'd rather they were shown but not treated as busy. The window is 2 weeks back, 8 forward.
+
+- **Refresh is manual, not a background timer.** Run `Weekfit: Refresh calendar feed` or press "Refresh now" in Settings; it's rate-limited to once an hour so a slow or misbehaving feed can't be hammered.
+- **ICS events are read-only.** They can't be dragged, resized, or clicked open. Drag one onto the rail if you want a task you can actually reschedule — that turns it into a plain line with an `[ics-uid::]` marker, and it stops being drawn as a calendar block from then on.
+- **A `reviewed` week is never touched by the feed.** Once a week is closed out, there's nothing left for a calendar sync to do.
+- **One feed, no OAuth.** A single iCalendar URL — no Google Calendar sign-in, no multiple calendars, no per-calendar colours. It's read-only: nothing is ever written back to the feed itself.
+
+## 0.1.1 — first release
 
 **You have eleven hours of work and a week with holes in it. Press one button and see where it fits.**
 

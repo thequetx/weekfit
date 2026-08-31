@@ -29,7 +29,7 @@ import type { PriorityName } from '../lib/taskmeta';
 import { withDue, withEstimate, withPriority } from './taskfields';
 import type { MetaFlavour } from '../lib/taskmeta';
 import { applyPlacement, hasPlacement, splitTaskPrefix } from './dayplanner';
-import type { PlacementEdit, WriteResult, WriteSkip } from './contract';
+import type { IcsLink, PlacementEdit, WriteResult, WriteSkip } from './contract';
 import { isJournalling, record } from './journal';
 
 /** Local-time `YYYY-MM-DD` for day `day` (0 = Monday) of the week starting
@@ -1041,4 +1041,105 @@ export async function createNote(app: App, file: string, content: string): Promi
     errors.push(`${file}: ${err instanceof Error ? err.message : String(err)}`);
     return { written: 0, skipped: [], errors };
   }
+}
+
+// ---------------------------------------------------------------------------
+// updateIcsTaskRanges / clearIcsUidMarkers — applying an ICS delta
+// ---------------------------------------------------------------------------
+
+/** Matches a `[ics-uid:: …]` (or parenthesised `(ics-uid:: …)`) field, one
+ *  leading space included — the mirror of `ICS_UID_RE` in `parse.ts`'s
+ *  `findIcsLinks`, written separately because that one *captures* the value
+ *  and this one only needs to *remove* it, leading space and all, so removal
+ *  never leaves a run of two spaces where the field used to sit. */
+const ICS_UID_STRIP_RE = /\s?[[(]\s*ics-uid\s*::\s*[^\])]+?\s*[\])]/i;
+
+function stripIcsUid(text: string): string {
+  return text.replace(ICS_UID_STRIP_RE, '');
+}
+
+/** A tracked line's display title, for `WriteSkip`/`VerifiedEdit` reporting.
+ *  Strips the checkbox prefix, any existing Day Planner range, and the
+ *  `[ics-uid::]` marker itself first — `parseTaskMeta` only recognises the
+ *  Tasks-standard fields, so an unrecognised inline field like `ics-uid`
+ *  would otherwise ride along into the title unstripped (the same trap
+ *  `scheduledEvents` in parse.ts already steps around for the Day Planner
+ *  range when it builds an event's own `title`). */
+function icsLinkTitle(text: string): string {
+  const { body } = splitTaskPrefix(text);
+  return taskTitle(stripIcsUid(body.replace(DAY_PLANNER_RE, '')));
+}
+
+/** `Date` -> minutes since local midnight, what `dayPlannerRange` wants. */
+function clockMinutes(d: Date): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/**
+ * Rewrite the leading Day Planner range on each linked task line to a new
+ * `start`/`end`, and nothing else — title, tags, emoji/inline metadata,
+ * `[ics-uid::]`, indentation, checkbox state and the trailing remainder all
+ * survive byte-for-byte. This is `applyPlacement` with `scheduledDate: null`,
+ * the same call `editPlacements`' re-time path makes: touch the range,
+ * decline to touch a scheduled date that isn't this function's business.
+ *
+ * Goes through `rewriteVerifiedLines`, so the same guard every other writer
+ * in this file has applies here too: a line whose text no longer matches
+ * `link.text` — the user edited it by hand since the vault was last read — is
+ * refused as `line-changed` rather than clobbered with whatever the feed now
+ * says. That refusal is spec'd behaviour (Verification Test 3), not a
+ * shortcut: it's what makes a manual edit safe from an automated merge.
+ *
+ * Returns one `WriteResult` per update rather than one aggregate for the
+ * whole batch — unlike `editPlacements` et al. — because the caller here
+ * (the modal a later wave owns) needs to show *which* of several proposed
+ * updates actually landed, not just a combined count.
+ */
+export async function updateIcsTaskRanges(
+  app: App,
+  updates: Array<{ link: IcsLink; start: Date; end: Date }>,
+): Promise<WriteResult[]> {
+  const results: WriteResult[] = [];
+  for (const u of updates) {
+    const range = dayPlannerRange(clockMinutes(u.start), clockMinutes(u.end));
+    const edit: VerifiedEdit = {
+      file: u.link.path,
+      line: u.link.line,
+      expectedText: u.link.text,
+      title: icsLinkTitle(u.link.text),
+    };
+    results.push(
+      await rewriteVerifiedLines(app, [edit], (current) =>
+        applyPlacement(current, { range, scheduledDate: null }),
+      ),
+    );
+  }
+  return results;
+}
+
+/**
+ * The "removed from feed" path: untrack a task by stripping its
+ * `[ics-uid::]` marker, without touching anything else on the line —
+ * critically, without deleting the line itself. The spec is explicit that a
+ * calendar event disappearing from the feed (cancelled, moved off the shared
+ * calendar) means the task stops being synced, not that the user's task
+ * vanishes with it; whatever they already wrote under that checkbox is
+ * theirs to keep or clear by hand.
+ *
+ * Same verified-write discipline as `updateIcsTaskRanges`: a line that no
+ * longer matches `link.text` is refused (`line-changed`) rather than
+ * stripped blind.
+ */
+export async function clearIcsUidMarkers(app: App, links: IcsLink[]): Promise<WriteResult[]> {
+  const results: WriteResult[] = [];
+  for (const link of links) {
+    const edit: VerifiedEdit = {
+      file: link.path,
+      line: link.line,
+      expectedText: link.text,
+      title: icsLinkTitle(link.text),
+    };
+    results.push(await rewriteVerifiedLines(app, [edit], (current) => stripIcsUid(current)));
+  }
+  return results;
 }

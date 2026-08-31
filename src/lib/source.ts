@@ -86,6 +86,26 @@ export function dayPlannerRange(startMin: number, endMin: number): string {
 export const DAY_PLANNER_RE = /^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\s+/;
 
 /**
+ * Is this line's work already placed in the week?
+ *
+ * A leading Day Planner range is the one scheduling signal every tool here
+ * shares: this app writes one when it schedules (Phase 5 §5), the Weekfit
+ * plugin writes one from inside Obsidian, and a human can type one. Unlike a
+ * calendar event it needs no calendar, and unlike a `wdTaskId` it survives
+ * being retyped.
+ *
+ * It lives here, exported, because bug #30 was the engine and the rail
+ * answering this question differently — `fitTasks` correctly refused to
+ * propose placed work while the rail went on calling it unscheduled. One
+ * predicate, both callers.
+ */
+export function isPlaced(text: string): boolean {
+  // The vault hands over a task line with its list marker and checkbox already
+  // stripped, so the range — if there is one — is at the front of this string.
+  return DAY_PLANNER_RE.test(String(text ?? '').trimStart());
+}
+
+/**
  * Put `range` at the front of a task line's text, replacing any range already
  * there. Rescheduling the same task twice must not produce
  * `09:00 - 10:30 11:00 - 12:00 Fix badge alpha`.

@@ -102,6 +102,22 @@ still sitting in your notes in a format three other tools understand.
 | **Drag back to the rail** | Takes a block off the week again |
 | **Backlog + capture** | Somewhere for later, and a one-line way to get things there |
 | **Undo** | Puts back the last change, across every file it touched |
+| **Calendar sync** | One read-only ICS feed, drawn on the grid and blocking gaps by default — see below |
+
+### Calendar sync
+
+One read-only feed URL, added in **Settings → Weekfit**. Its events appear on
+the grid alongside everything else and, by default, block scheduling gaps —
+Fit this week won't propose a slot your calendar already has claimed. The
+window is **2 weeks back to 8 weeks ahead**.
+
+Refresh is a manual command (`Weekfit: Refresh calendar feed`) or the
+"Refresh now" button in Settings — never a background timer — and it's
+rate-limited to once an hour so a slow or misbehaving feed can't be hammered
+on every render. **ICS events are read-only.** Drag one onto the rail if you
+need a task you can reschedule; that turns it into an ordinary line, and it
+stops being drawn as a calendar block. A week already marked `reviewed` is
+never touched by the feed.
 
 ## How your notes are treated
 
@@ -137,6 +153,7 @@ This is the part worth trusting before you install anything that writes to your 
 | `Toggle gap candidates` | Shows the free slots the engine can see |
 | `Undo last change` | Puts back the last thing Weekfit wrote |
 | `Refresh week` | Re-reads the vault |
+| `Refresh calendar feed` | Fetches the ICS feed now, rate-limited to once an hour |
 
 No hotkeys are claimed — bind your own in Settings → Hotkeys.
 
@@ -148,11 +165,12 @@ keep in sync. You can override it.
 
 ## What it deliberately doesn't do
 
-- **No Google Calendar.** A plugin shipping one OAuth client ID to thousands of installs
-  is a different legal posture from a personal app, and it's exactly what Google's
-  verification exists to police. Dropping it removes the verification burden, the
-  "unverified app" screen and the 100-user cap in one decision. A read-only ICS URL is the
-  likely first step if calendar support is wanted.
+- **No Google Calendar OAuth.** A plugin shipping one OAuth client ID to thousands of
+  installs is a different legal posture from a personal app, and it's exactly what
+  Google's verification exists to police. Dropping it removes the verification burden,
+  the "unverified app" screen and the 100-user cap in one decision. The [Calendar
+  sync](#calendar-sync) feed above — a read-only ICS URL, which Google Calendar (and
+  most others) can export without any of that — covers the common case instead.
 - **No AI.** Everything here works with every model switched off.
 - **No account, no server, no telemetry.** It reads and writes files in your vault.
 - **No task format of its own.** It reads the Obsidian Tasks standard and writes a time
@@ -162,9 +180,9 @@ keep in sync. You can override it.
 
 ## Status
 
-**Released — [0.1.1](https://github.com/thequetx/weekfit/releases/tag/0.1.1), listed in the
-[Obsidian directory](https://community.obsidian.md/plugins/weekfit).** First public
-version, so treat it accordingly: it is in daily use by the author and has **905 tests**,
+**Released — [0.2.0](https://github.com/thequetx/weekfit/releases/tag/0.2.0), listed in the
+[Obsidian directory](https://community.obsidian.md/plugins/weekfit).** Still an early
+version, so treat it accordingly: it is in daily use by the author and has **982 tests**,
 including component tests and an end-to-end pass that runs the real read → fit → write
 pipeline against real files on disk and asserts the resulting bytes — but nobody else's
 vault has met it yet. A scratch vault for the first hour is not a bad idea.

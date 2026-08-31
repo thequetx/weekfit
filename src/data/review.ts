@@ -28,7 +28,6 @@ import { auditNoteLines, auditWeek } from '../lib/audit';
 import type { WeekAudit } from '../lib/audit';
 import { isRecurring, taskTitle } from '../lib/taskmeta';
 import { withDayPlannerRange } from '../lib/source';
-import { applyPlacement } from './dayplanner';
 import { futureSessions } from '../lib/gaps';
 import { addDays } from '../lib/week';
 import type { VaultTask } from '../lib/types';
@@ -105,6 +104,16 @@ export function computeReview(
   let plannedMin = 0;
   let keptMin = 0;
   snapshot.scheduled.forEach((ev, i) => {
+    // `scheduled` can run longer than `scheduledLines` — ICS events are
+    // appended past the end of it (see the field doc on
+    // `WeekSnapshot.scheduledLines` in contract.ts), specifically so an index
+    // past the vault lines finds "no matching line" rather than the wrong one.
+    // Without this guard, a calendar feed's own busy time got counted into
+    // `plannedMin`/`hours_planned` even though nobody asked this plugin to
+    // plan it — it's the user's existing commitment, not a task the review
+    // should grade. Only a block that actually came from a vault line — one
+    // this plugin (or the user) could plan and later mark done — counts here.
+    if (!snapshot.scheduledLines[i]) return;
     const minutes = Math.max(0, Math.round((ev.end.getTime() - ev.start.getTime()) / 60000));
     plannedMin += minutes;
     if (snapshot.scheduledLines[i]?.done) keptMin += minutes;
@@ -122,14 +131,13 @@ export function computeReview(
   // hasn't happened yet".
   //
   // `futureSessions` is exactly that question, and `fitTasks` already uses it
-  // to leave booked work alone. It matches an event to a task by title, so
-  // the line needs its range stripped first: the event's title comes from
-  // `scheduledEvents`, which removes the `HH:MM` range, while `parseTaskMeta`
-  // deliberately keeps it in the task's display title. Same trap
-  // `computeReplan` had to step around.
+  // to leave booked work alone. It matches an event to a task by title, and
+  // the two disagree by a leading `HH:MM` range — the event's title comes
+  // from `scheduledEvents`, which strips it, while `parseTaskMeta` keeps it
+  // in the task's display title. `titleKey` (lib/gaps.ts) reconciles that
+  // itself, so the line goes in unmodified.
   const stillToCome = (t: VaultTask): boolean =>
-    futureSessions(snapshot.scheduled, { ...t, text: applyPlacement(t.text, { range: null, scheduledDate: null }) }, now)
-      .length > 0;
+    futureSessions(snapshot.scheduled, t, now).length > 0;
 
   const unfinished = [...snapshot.tasks, ...snapshot.thisweek].filter(
     (t) => !t.done && !isRecurring(t.text) && !stillToCome(t),

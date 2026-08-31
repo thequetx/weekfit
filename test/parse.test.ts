@@ -202,6 +202,19 @@ describe('scheduledEvents', () => {
     expect(unresolved).toBe(1);
   });
 
+  it('does not count an undated Day Planner line carrying an [ics-uid::] marker as unresolved', () => {
+    // icsCaptureLine (icsCapture.ts) writes exactly this shape on purpose —
+    // a calendar event dropped onto the rail is meant to land unscheduled —
+    // so it must not trip the "N timed lines have no date" banner.
+    const content = [
+      '- [ ] 09:00 - 09:30 Plain undated timed line', // unresolved -> counted
+      '- [ ] 10:00 - 10:30 Standup [ics-uid:: abc-123]', // deliberately undated -> not counted
+    ].join('\n');
+    const { events, unresolved } = scheduledEvents(content, 'Weekly/2026-W36.md', null, weekStart);
+    expect(events).toHaveLength(0);
+    expect(unresolved).toBe(1);
+  });
+
   it('drops a resolved event that falls outside the rendered week', () => {
     const content = '- [ ] 09:00 - 10:30 Fix badge alpha ⏳ 2026-09-14';
     const { events, unresolved } = scheduledEvents(content, 'Weekly/2026-W36.md', null, weekStart);

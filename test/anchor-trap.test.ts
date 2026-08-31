@@ -50,11 +50,21 @@ describe('the DAY_PLANNER_RE anchoring trap', () => {
   it('is never applied to a whole task line outside dayplanner.ts', () => {
     // Matches `DAY_PLANNER_RE.test(x.text`, `withDayPlannerRange(x.text`, and
     // `x.text.replace(DAY_PLANNER_RE` — the three shapes the bug has taken.
+    //
+    // The fourth is `isPlaced(x.text)`, which arrived with the engine sync and
+    // is the trap wearing a disguise: it makes the `DAY_PLANNER_RE` call
+    // itself, and its own comment says "the vault hands over a task line with
+    // its list marker and checkbox already stripped". That is true in
+    // week-dashboard and false here — `VaultTask.text` is the whole raw line —
+    // so `isPlaced(task.text)` is silently always-false on real vault data,
+    // exactly like the other three. Nothing calls it yet. This is here so that
+    // when something does, it fails immediately instead of in six months.
     const offenders: string[] = [];
     const patterns = [
       /DAY_PLANNER_RE\.(test|exec)\(\s*[A-Za-z_$][\w$]*\.text\b/,
       /withDayPlannerRange\(\s*[A-Za-z_$][\w$]*\.text\b/,
       /[A-Za-z_$][\w$]*\.text\.replace\(\s*DAY_PLANNER_RE/,
+      /\bisPlaced\(\s*[A-Za-z_$][\w$]*\.text\b/,
     ];
 
     for (const file of sourceFiles(ROOT)) {

@@ -15,10 +15,20 @@ import type { CalEvent, VaultTask } from '../lib/types';
 import type { WeekfitSettings } from './contract';
 import type { WeekSnapshot } from './contract';
 import { resolveNoteLocations } from './periodicNotes';
-import { parseSections, parseTasksIn, scheduledEvents, sweepTagged } from './parse';
+import { findIcsLinks, parseSections, parseTasksIn, scheduledEvents, sweepTagged } from './parse';
+import type { IcsLink } from './contract';
+// Aliased so `VaultRepo.fetchIcsEvents` (the settings-aware wrapper other
+// callers use) doesn't collide with the module-level function it delegates
+// to.
+import { fetchIcsEvents as loadIcsFeed } from './ics';
 
 const THISWEEK_TAG = 'thisweek';
 const DEBOUNCE_MS = 300;
+
+/** How long a fetched calendar feed is reused before the next `readWeek` goes
+ *  back to the network. Matches the refresh command's own hourly limit, so the
+ *  two never disagree about how fresh "fresh" is. */
+const ICS_CACHE_MS = 60 * 60 * 1000;
 
 // `obsidian.d.ts` types `moment` via `import * as Moment from 'moment'; export
 // const moment: typeof Moment`. Under this project's `esModuleInterop` +
@@ -47,6 +57,11 @@ export class VaultRepo {
     private readonly app: App,
     private readonly getSettings: () => WeekfitSettings,
   ) {}
+
+  /** Last successful feed fetch, reused by every `readWeek` inside
+   *  {@link ICS_CACHE_MS}. See `fetchIcsEvents` for why this is not
+   *  optional. */
+  private icsCache: { url: string; fetchedAt: number; events: CalEvent[] } | null = null;
 
   /**
    * The single entry point: everything a rendered week needs, read fresh from
@@ -148,6 +163,28 @@ export class VaultRepo {
       errors.push(`#thisweek sweep failed: ${err instanceof Error ? err.message : String(err)}`);
     }
 
+    // --- the calendar feed ------------------------------------------------
+    //
+    // A `reviewed` week is closed — the note is done being written, and the
+    // whole point of ICS here is to help *plan* the week, so there's nothing
+    // for it to do once review has happened. Skipped entirely rather than
+    // fetched-and-ignored, so a reviewed week never pays the network cost.
+    const reviewedStatus = weeklyFile
+      ? this.app.metadataCache.getFileCache(weeklyFile)?.frontmatter?.status
+      : undefined;
+    const icsEvents: CalEvent[] = reviewedStatus === 'reviewed' ? [] : await this.fetchIcsEvents();
+
+    // `icsEvents` is always carried on the snapshot (see the field doc in
+    // contract.ts); it only also joins `scheduled` — and therefore reserves
+    // gaps via computeGaps — when the busy toggle is on. Appended *after* the
+    // Day Planner events collected above, deliberately: several consumers
+    // (`review.ts`, `planner.ts`) pair `scheduled[i]` with `scheduledLines[i]`
+    // or build a same-length array from `scheduledLines` alone, and none of
+    // them index past `scheduledLines.length` — but keeping ICS events at the
+    // tail, past every real line, means a consumer that ever did would find
+    // "no matching line" rather than "the wrong line".
+    if (settings.icsEventsBusy) events.push(...icsEvents);
+
     return {
       weekId,
       weekStart,
@@ -157,8 +194,53 @@ export class VaultRepo {
       thisweek,
       scheduled: events,
       scheduledLines,
+      icsEvents,
       errors,
     };
+  }
+
+  /**
+   * The plugin's one calendar feed, if configured. Delegates to
+   * `data/ics.ts`'s module-level `fetchIcsEvents`, which never
+   * throws — a bad or empty URL, a network failure, or a malformed feed all
+   * come back as `[]` so a broken calendar setting never stops the week from
+   * rendering.
+   *
+   * ⚠️ **Cached, and it has to be.** `readWeek` calls this, and `readWeek`
+   * runs on every debounced vault change — so without a cache, typing in any
+   * note in the vault would put an HTTPS request to the user's calendar
+   * provider on the wire every 300ms. That is the "server hammering" the
+   * hourly limit on the *refresh command* was meant to prevent, arriving by
+   * the back door: that limit governs reconciling `[ics-uid::]` markers, not
+   * drawing the feed on the grid. A calendar does not change often enough for
+   * a re-read of the same week to be worth a round trip, so the cache holds
+   * for {@link ICS_CACHE_MS} and the explicit command bypasses it with
+   * `force`.
+   *
+   * Keyed on the URL, so changing the setting takes effect immediately rather
+   * than showing the old calendar for an hour.
+   */
+  async fetchIcsEvents(force = false): Promise<CalEvent[]> {
+    const settings = this.getSettings();
+    const url = settings.icsUrl?.trim();
+    if (!url) {
+      this.icsCache = null;
+      return [];
+    }
+
+    const cached = this.icsCache;
+    if (
+      !force &&
+      cached &&
+      cached.url === url &&
+      Date.now() - cached.fetchedAt < ICS_CACHE_MS
+    ) {
+      return cached.events;
+    }
+
+    const events = await loadIcsFeed(url);
+    this.icsCache = { url, fetchedAt: Date.now(), events };
+    return events;
   }
 
   /**
@@ -283,20 +365,33 @@ export class VaultRepo {
     return { tasks: out.slice(0, limit), unscoped: false, truncated, errors };
   }
 
-  private async sweepThisWeek(settings: WeekfitSettings): Promise<VaultTask[]> {
+  /**
+   * Markdown files honouring `taskFolders`/`excludeFolders` the same way the
+   * `#thisweek` sweep always has: `taskFolders: []` means "the whole vault"
+   * here (unlike `readBacklog`, which treats an empty scope as "ask the user
+   * to configure folders" rather than defaulting to everything — a
+   * deliberately different policy, so it keeps its own filter rather than
+   * sharing this one). Extracted so the `#thisweek` sweep and the
+   * `[ics-uid::]` scan walk the vault exactly the same way instead of growing
+   * two copies of this filter that could drift apart.
+   */
+  private filesInScope(settings: WeekfitSettings): TFile[] {
     const folders = settings.taskFolders ?? [];
     const excludes = settings.excludeFolders ?? [];
-    const target = `#${THISWEEK_TAG}`.toLowerCase();
 
-    const files = this.app.vault.getMarkdownFiles().filter((f) => {
+    return this.app.vault.getMarkdownFiles().filter((f) => {
       const path = f.path.replace(/\\/g, '/');
       if (path.endsWith('Handoff Log.md')) return false;
       if (excludes.some((ex) => pathUnderFolder(path, ex))) return false;
       if (folders.length > 0 && !folders.some((fo) => pathUnderFolder(path, fo))) return false;
       return true;
     });
+  }
 
-    const candidates = files.filter((f) => {
+  private async sweepThisWeek(settings: WeekfitSettings): Promise<VaultTask[]> {
+    const target = `#${THISWEEK_TAG}`.toLowerCase();
+
+    const candidates = this.filesInScope(settings).filter((f) => {
       const cache = this.app.metadataCache.getFileCache(f);
       const tags = cache?.tags ?? [];
       return tags.some((t) => String(t?.tag ?? '').toLowerCase() === target);
@@ -310,6 +405,33 @@ export class VaultRepo {
       } catch {
         // An unreadable file during the sweep is skipped, not fatal — the
         // rest of the week still has to render.
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Every `[ics-uid::]` marker in the vault, i.e. every task the
+   * user has already converted from a calendar event. This is the "tracked
+   * uids" list `icsState.ts`'s `deltaIcsEvents`/`nextIcsState` need: not
+   * "every event in the feed", only the ones with a task line to reconcile.
+   *
+   * Unlike `[ics-uid::]`, this marker carries no Obsidian tag to narrow the
+   * file list by cache first — a Dataview inline field isn't indexed that
+   * way — so every in-scope file is read. Same non-fatal discipline as the
+   * `#thisweek` sweep: a file that fails to read is dropped, not thrown.
+   */
+  async readIcsLinks(): Promise<IcsLink[]> {
+    const settings = this.getSettings();
+    const files = this.filesInScope(settings);
+
+    const out: IcsLink[] = [];
+    for (const f of files) {
+      try {
+        const content = await this.app.vault.cachedRead(f);
+        out.push(...findIcsLinks(content, f.path));
+      } catch {
+        // Unreadable file — skipped, same as everywhere else in this class.
       }
     }
     return out;

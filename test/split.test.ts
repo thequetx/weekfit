@@ -55,6 +55,7 @@ function snapshot(over: Partial<WeekSnapshot> = {}): WeekSnapshot {
     thisweek: [],
     scheduled: [block(2, 9 * 60, 360)],
     scheduledLines: [TARGET.task],
+    icsEvents: [],
     errors: [],
     ...over,
   };

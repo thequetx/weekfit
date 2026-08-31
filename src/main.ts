@@ -1,4 +1,4 @@
-import { Menu, Notice, Plugin, TFile } from 'obsidian';
+import { Menu, moment as obsidianMoment, Notice, Plugin, TFile } from 'obsidian';
 import { VIEW_TYPE_WEEK, WeekView } from './views/WeekView';
 import { VIEW_TYPE_BACKLOG, BacklogView } from './views/BacklogView';
 import { CaptureModal } from './views/CaptureModal';
@@ -16,16 +16,23 @@ import type { SplitPlan, SplitTarget } from './data/split';
 import {
   acceptProposals,
   appendUnderHeading,
+  clearIcsUidMarkers,
   createNote,
   editPlacements,
   isoDateFor,
   setTaskDone,
   setTaskFields,
+  updateIcsTaskRanges,
 } from './data/writer';
+import { deltaIcsEvents, nextIcsState } from './data/icsState';
+import { icsCaptureLine } from './data/icsCapture';
+import { IcsRefreshModal } from './views/IcsRefreshModal';
+import type { IcsRefreshSelection } from './views/IcsRefreshModal';
 import { SettingsTab } from './settings/SettingsTab';
 import { DEFAULT_SETTINGS } from './data/contract';
 import type {
   FitState,
+  IcsLink,
   PlacementEdit,
   WeekSnapshot,
   WeekfitSettings,
@@ -40,6 +47,34 @@ import { DURATION_CHOICES, dueChoices } from './data/dates';
 import { DueDateModal } from './views/DueDateModal';
 import { fmtEstimate, resolveTaskDuration, snapToGrid } from './lib/duration';
 import { addDays, addWeeks, dayIndex, minutesOfDay, startOfISOWeek } from './lib/week';
+import type { CalEvent } from './lib/types';
+
+/** Spec §2.5 — "Refresh calendar feed" is rate-limited to once an hour, so a
+ *  slow or misbehaving feed can't be hammered by repeated presses (or by the
+ *  Settings "Refresh now" button sitting right next to it). */
+const ICS_REFRESH_RATE_LIMIT_MS = 60 * 60 * 1000;
+
+// Same interop cast `vaultRepo.ts` already carries (and explains at length):
+// `obsidian.d.ts` types `moment` in a way that loses its call signature under
+// this project's `esModuleInterop` + `moduleResolution: "bundler"`, even
+// though the runtime value is the real, already-configured callable moment.
+// Purely a type-level workaround; the value itself is untouched.
+const momentFn = obsidianMoment as unknown as (date: Date | number) => { format(fmt: string): string };
+
+/** `updateIcsTaskRanges`/`clearIcsUidMarkers` each return one `WriteResult`
+ *  per link touched (writer.ts is explicit about why — a caller here needs to
+ *  know *which* proposed change landed). The modal only needs the aggregate,
+ *  the same shape `accept()`/`applyWrite()` already report through. */
+function combineWriteResults(results: WriteResult[]): WriteResult {
+  return results.reduce<WriteResult>(
+    (acc, r) => ({
+      written: acc.written + r.written,
+      skipped: [...acc.skipped, ...r.skipped],
+      errors: [...acc.errors, ...r.errors],
+    }),
+    { written: 0, skipped: [], errors: [] },
+  );
+}
 
 /** How often the now-line moves. A minute is the resolution it's drawn at, so
  *  anything finer is repaint for nothing. */
@@ -152,6 +187,11 @@ export default class WeekfitPlugin extends Plugin {
       id: 'create-week-note',
       name: "Create this week's note",
       callback: () => void this.createWeekNote(),
+    });
+    this.addCommand({
+      id: 'refresh-calendar-feed',
+      name: 'Refresh calendar feed',
+      callback: () => void this.refreshIcsFeed(),
     });
 
     this.addRibbonIcon('calendar-range', 'Open week view', () => void this.activateView());
@@ -821,6 +861,163 @@ export default class WeekfitPlugin extends Plugin {
     await this.openLine(path, 0);
   }
 
+  // -------------------------------------------------------------------------
+  // ICS — the refresh command, and dragging a read-only calendar
+  // block onto the rail to turn it into a task.
+  // -------------------------------------------------------------------------
+
+  /**
+   * "Refresh calendar feed" (spec §2.5–§2.7), and what Settings' "Refresh
+   * now" button calls too — `SettingsTab` needs exactly this method, not a
+   * second copy of the rate-limit/delta/modal flow beside it.
+   *
+   * Order, matching the spec exactly:
+   *  1. No URL configured -> say so and stop.
+   *  2. Under an hour since the last attempt -> say so and stop, touching
+   *     nothing (no fetch happened, so the clock shouldn't move either).
+   *  3. Fetch. From here on every path is a genuine attempt, so
+   *     `icsLastRefresh` is bumped before branching on what the attempt
+   *     found — the rate limit is about *attempts*, not about whether one
+   *     turned up anything worth a modal.
+   *  4. An empty feed with tracked links to compare against is ambiguous
+   *     (empty window vs. failure — `data/ics.ts` already `console.warn`'d
+   *     which) and worth a Notice; an empty feed with nothing tracked is not
+   *     worth alarming anyone over.
+   *  5–6. No real changes -> say so, persist state, and stop *without* a
+   *     modal — a no-op refresh must not cost a click.
+   *  7. Otherwise, open the summary modal; `icsState` itself waits for
+   *     "Apply" (see the modal's own `onApply`), so cancelling leaves the
+   *     same delta to reconsider next time.
+   */
+  async refreshIcsFeed(): Promise<void> {
+    const url = this.settings.icsUrl?.trim();
+    if (!url) {
+      new Notice('Weekfit: no calendar feed URL is set — add one in settings.');
+      return;
+    }
+
+    const sinceLast = Date.now() - this.settings.icsLastRefresh;
+    if (this.settings.icsLastRefresh > 0 && sinceLast < ICS_REFRESH_RATE_LIMIT_MS) {
+      const minsAgo = Math.max(0, Math.round(sinceLast / 60_000));
+      const nextAt = momentFn(this.settings.icsLastRefresh + ICS_REFRESH_RATE_LIMIT_MS).format(
+        'H:mm',
+      );
+      new Notice(`Weekfit: calendar refreshed ${minsAgo} min ago. Try again at ${nextAt}.`);
+      return;
+    }
+
+    // `force`: this is the user explicitly asking for fresh data, so it must
+    // bypass the read-path cache. The hourly limit above is what keeps that
+    // from becoming a way to hammer the feed.
+    const fresh = await this.repo.fetchIcsEvents(true);
+    const links = await this.repo.readIcsLinks();
+    const trackedUids = links.map((l) => l.uid);
+
+    this.settings.icsLastRefresh = Date.now();
+
+    if (fresh.length === 0 && trackedUids.length > 0) {
+      new Notice('Weekfit: calendar feed unavailable — the week is unchanged.');
+      await this.saveSettings();
+      return;
+    }
+
+    const delta = deltaIcsEvents(this.settings.icsState, fresh, trackedUids);
+
+    if (delta.updated.length === 0 && delta.removed.length === 0) {
+      new Notice(`Weekfit: calendar is up to date (${delta.unchanged.length} events unchanged).`);
+      this.settings.icsState = nextIcsState(this.settings.icsState, fresh, trackedUids);
+      await this.saveSettings();
+      return;
+    }
+
+    // Persist the bumped `icsLastRefresh` now — the rate limit has to hold
+    // even while the modal sits open unanswered — but leave `icsState` for
+    // "Apply" below, so a cancelled modal offers the same delta again next
+    // time rather than silently accepting it.
+    await this.saveSettings();
+
+    new IcsRefreshModal(this.app, {
+      delta,
+      onApply: (selection) => this.applyIcsRefresh(links, delta, fresh, trackedUids, selection),
+    }).open();
+  }
+
+  /**
+   * The modal's "Apply selected": turn the ticked rows into writes, persist
+   * the new tracking state, and hand the aggregated `WriteResult` both back
+   * to the modal (for its own one-line Notice) and to `this.lastWrite` (so
+   * the week view's `WriteResultNotice` shows the full breakdown — see
+   * `IcsRefreshModal.ts`'s header comment for why that's the reporting path
+   * used here rather than a second one local to the modal).
+   */
+  private async applyIcsRefresh(
+    links: IcsLink[],
+    delta: ReturnType<typeof deltaIcsEvents>,
+    fresh: CalEvent[],
+    trackedUids: string[],
+    selection: IcsRefreshSelection,
+  ): Promise<WriteResult> {
+    const linkByUid = new Map(links.map((l) => [l.uid, l]));
+
+    const updates = delta.updated
+      .filter((u) => selection.updatedUids.has(u.uid))
+      .map((u) => {
+        const link = linkByUid.get(u.uid);
+        return link ? { link, start: new Date(u.newStart), end: new Date(u.newEnd) } : null;
+      })
+      .filter((u): u is { link: IcsLink; start: Date; end: Date } => u != null);
+
+    const removedLinks = delta.removed
+      .filter((r) => selection.removedUids.has(r.uid))
+      .map((r) => linkByUid.get(r.uid))
+      .filter((l): l is IcsLink => l != null);
+
+    beginJournal();
+    let result: WriteResult;
+    try {
+      const updateResults = updates.length ? await updateIcsTaskRanges(this.app, updates) : [];
+      const clearResults = removedLinks.length
+        ? await clearIcsUidMarkers(this.app, removedLinks)
+        : [];
+      result = combineWriteResults([...updateResults, ...clearResults]);
+    } finally {
+      this.undoStack.push('Sync calendar changes', endJournal());
+    }
+
+    this.lastWrite = result;
+    this.settings.icsState = nextIcsState(this.settings.icsState, fresh, trackedUids);
+    if (result.errors.length) {
+      new Notice(`Weekfit: ${result.errors.length} file(s) could not be written — see the view.`);
+    }
+    await this.saveSettings();
+    return result;
+  }
+
+  /**
+   * A read-only ICS block dragged onto the rail (spec §2.4): capture it as a
+   * task via the exact write path "Capture a task" already uses
+   * (`appendUnderHeading` under the week note's `## Tasks`) rather than a
+   * second writer — `data/icsCapture.ts` builds the line, this only lands it.
+   */
+  private async dropIcsToRail(ev: CalEvent): Promise<void> {
+    const path = this.weekNotePath();
+    const line = icsCaptureLine(ev);
+
+    beginJournal();
+    try {
+      const result = await appendUnderHeading(this.app, [
+        { file: path, heading: 'Tasks', lines: [line] },
+      ]);
+      this.lastWrite = result;
+      if (result.errors.length) {
+        new Notice(`Weekfit: couldn't add "${ev.title}" as a task — ${result.errors[0]}`);
+      }
+    } finally {
+      this.undoStack.push('Add a calendar event as a task', endJournal());
+    }
+    await this.refresh();
+  }
+
   private async openLine(file: string, line: number): Promise<void> {
     const f = this.app.vault.getAbstractFileByPath(file);
     if (!(f instanceof TFile)) {
@@ -1086,6 +1283,7 @@ export default class WeekfitPlugin extends Plugin {
             void this.resizeBlock(uid, startMin, endMin),
           onResizeProposal: (groupKey: string, startMin: number, endMin: number) =>
             this.resizeProposal(groupKey, startMin, endMin),
+          onDropIcsToRail: (ev: CalEvent) => void this.dropIcsToRail(ev),
           ...next,
         });
       }

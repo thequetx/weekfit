@@ -32,6 +32,7 @@ function snapshot(overrides: Partial<WeekSnapshot> = {}): WeekSnapshot {
     thisweek: [],
     scheduled: [],
     scheduledLines: [],
+    icsEvents: [],
     errors: [],
     ...overrides,
   };

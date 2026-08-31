@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WeekViewRoot } from '../src/views/WeekViewRoot';
 import type { WeekViewRootProps } from '../src/views/WeekViewRoot';
@@ -49,6 +49,7 @@ function snapshot(overrides: Partial<WeekSnapshot> = {}): WeekSnapshot {
     // `scheduledLines` provide both explicitly; everything else is fine with
     // an empty pair.
     scheduledLines: [],
+    icsEvents: [],
     errors: [],
     ...overrides,
   };
@@ -138,6 +139,7 @@ function renderRoot(overrides: Partial<WeekViewRootProps> = {}) {
     onOpenSource: noop,
     onResizeBlock: noop,
     onResizeProposal: noop,
+    onDropIcsToRail: noop,
     ...overrides,
   };
   return render(<WeekViewRoot {...props} />);
@@ -277,6 +279,92 @@ describe('WeekViewRoot — scheduled events', () => {
       const other = document.querySelector(`[data-day="${di}"]`);
       expect(other!.querySelector('.weekfit-ev')).toBeNull();
     }
+  });
+});
+
+describe('WeekViewRoot — calendar-feed events', () => {
+  it('renders snapshot.icsEvents on the grid, distinct from a real block', () => {
+    const wednesday = addDays(WEEK_START, 2);
+    const start = new Date(wednesday);
+    start.setHours(14, 0, 0, 0);
+    const end = new Date(wednesday);
+    end.setHours(15, 0, 0, 0);
+
+    renderRoot({
+      snapshot: snapshot({
+        icsEvents: [calEvent({ uid: 'cal-1', title: 'Dentist', start, end })],
+      }),
+    });
+
+    const col = document.querySelector('[data-day="2"]');
+    const ev = col!.querySelector('.weekfit-ev--ics');
+    expect(ev).not.toBeNull();
+    expect(ev!.textContent).toContain('Dentist');
+  });
+
+  it('dragging an ICS block onto the rail calls onDropIcsToRail with the CalEvent', () => {
+    const wednesday = addDays(WEEK_START, 2);
+    const start = new Date(wednesday);
+    start.setHours(14, 0, 0, 0);
+    const end = new Date(wednesday);
+    end.setHours(15, 0, 0, 0);
+    const ics = calEvent({ uid: 'cal-2', title: 'Dentist', start, end });
+    const onDropIcsToRail = vi.fn();
+
+    renderRoot({
+      snapshot: snapshot({ icsEvents: [ics] }),
+      onDropIcsToRail,
+    });
+
+    const block = document.querySelector('.weekfit-ev--ics') as HTMLElement;
+    const rail = document.querySelector('.weekfit-railwrap') as HTMLElement;
+    // jsdom gives every rect zero size; stub the rail's so `isOverRail`
+    // (WeekViewRoot's own hit-test, handed down to WeekGrid) has a real box
+    // to test the drop point against — same technique WeekGrid.test.tsx's
+    // `installGeometry` uses for the grid's own columns.
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue({
+      x: 900,
+      y: 0,
+      width: 260,
+      height: 800,
+      top: 0,
+      left: 900,
+      right: 1160,
+      bottom: 800,
+      toJSON() {
+        return this;
+      },
+    } as DOMRect);
+
+    fireEvent.pointerDown(block, { clientX: 50, clientY: 300, pointerId: 1 });
+    act(() => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', { clientX: 950, clientY: 300, pointerId: 1, bubbles: true }),
+      );
+      window.dispatchEvent(
+        new PointerEvent('pointerup', { clientX: 950, clientY: 300, pointerId: 1, bubbles: true }),
+      );
+    });
+
+    expect(onDropIcsToRail).toHaveBeenCalledWith(ics);
+  });
+
+  it('an event already captured as a task (a matching [ics-uid::] marker in the snapshot) is not drawn as an ICS block', () => {
+    const wednesday = addDays(WEEK_START, 2);
+    const start = new Date(wednesday);
+    start.setHours(14, 0, 0, 0);
+    const end = new Date(wednesday);
+    end.setHours(15, 0, 0, 0);
+    const ics = calEvent({ uid: 'cal-3', title: 'Dentist', start, end });
+
+    renderRoot({
+      snapshot: snapshot({
+        icsEvents: [ics],
+        tasks: [vaultTask('- [ ] 14:00 - 15:00 Dentist [ics-uid:: cal-3]')],
+      }),
+    });
+
+    expect(document.querySelector('.weekfit-ev--ics')).toBeNull();
   });
 });
 
