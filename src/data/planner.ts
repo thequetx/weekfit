@@ -16,7 +16,6 @@ import { passedBlocks, replanFit } from '../lib/replan';
 import { gapWindowNames } from '../lib/gaps';
 import type { Gap } from '../lib/gaps';
 import type { CalEvent } from '../lib/types';
-import { applyPlacement } from './dayplanner';
 import { isRailTask } from './sessions';
 import { orderByFit, orderForFit } from './fitorder';
 import type { VaultTask } from '../lib/types';
@@ -112,41 +111,29 @@ export function computeReplan(
   );
 
   // `passedBlocks` matches an event back to its task by title (or by `🆔`,
-  // which nothing in this Obsidian-only port ever stamps). In the desktop app
-  // those titles agreed: the event lived in Google with a clean summary while
-  // the task line carried no range. Here the event is *derived from* the task
-  // line — `scheduledEvents` strips the `HH:MM - HH:MM` to make the title,
-  // while `parseTaskMeta` deliberately leaves the range in place (it is not
-  // one of the Tasks standard's fields). So `- [ ] 09:00 - 10:00 Fix badge
-  // alpha` has the display title `09:00 - 10:00 Fix badge alpha`, never
-  // matches the event's `Fix badge alpha`, and replan silently found nothing
-  // at all.
-  //
-  // Match on the line with its range stripped, then put the real text back:
-  // the writer refuses any edit whose expected text does not match the file
-  // byte-for-byte, so a proposal carrying the de-ranged line would be refused
-  // as `line-changed` on every accept.
-  const matchable = snapshot.scheduledLines.map((t) => ({
-    ...t,
-    text: applyPlacement(t.text, { range: null, scheduledDate: null }),
-  }));
-
-  const passed = passedBlocks(snapshot.weekStart, snapshot.scheduled, matchable, { now });
+  // which nothing in this Obsidian-only port ever stamps), and here the event
+  // is *derived from* the task line: `scheduledEvents` strips the
+  // `HH:MM - HH:MM` to make the title, while `parseTaskMeta` deliberately
+  // leaves the range in place, since it is not one of the Tasks standard's
+  // fields. The two sides are reconciled inside `titleKey` (lib/gaps.ts),
+  // which strips a leading range before comparing — so the real lines go in
+  // as they are, and the proposals come back carrying the exact text the
+  // writer will verify against.
+  const passed = passedBlocks(
+    snapshot.weekStart,
+    snapshot.scheduled,
+    snapshot.scheduledLines,
+    { now },
+  );
 
   // Same deadline-first order as "Fit this week" — `replanFit` places from an
   // insertion-ordered Map, so this list is its priority order too. A due date
   // that mattered when the work was first planned still matters now.
-  const { proposals: raw, unplaced } = replanFit(
+  const { proposals, unplaced } = replanFit(
     orderByFit(passed, (b) => b.task.text),
     gaps,
     settings.durations,
   );
-
-  const realText = new Map(snapshot.scheduledLines.map((t) => [`${t.file}:${t.line}`, t.text]));
-  const proposals = raw.map((p) => {
-    const actual = realText.get(`${p.file}:${p.line}`);
-    return actual == null ? p : { ...p, text: actual };
-  });
 
   // The hours actually being re-proposed — each passed session's own
   // duration, snapped the same way `replanFit` snaps it internally, so this
