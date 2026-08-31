@@ -423,7 +423,7 @@ export class VaultRepo {
    */
   async readIcsLinks(): Promise<IcsLink[]> {
     const settings = this.getSettings();
-    const files = this.filesInScope(settings);
+    const files = this.markerSearchScope(settings);
 
     const out: IcsLink[] = [];
     for (const f of files) {
@@ -435,6 +435,34 @@ export class VaultRepo {
       }
     }
     return out;
+  }
+
+  /**
+   * Where to look for `[ics-uid::]` markers: **everything except
+   * `excludeFolders`**, deliberately *not* `filesInScope`.
+   *
+   * `taskFolders` bounds the `#thisweek` sweep — "which folders hold tasks I
+   * might want to pull into this week". That is a different question from
+   * "where are the markers this plugin itself wrote", and answering the second
+   * with the first is a bug with no symptom: dragging a calendar event onto
+   * the rail appends the task to the **weekly note**, which is hardly ever
+   * inside `taskFolders`. So the moment a user narrows the sweep — the normal
+   * reason that setting exists — every marker becomes invisible, `readIcsLinks`
+   * returns `[]`, and every refresh reports "calendar is up to date" forever
+   * while tracking nothing. Silent, permanent, and indistinguishable from
+   * working.
+   *
+   * A marker also outlives the week it was made in, so scoping to the current
+   * week's notes would not be enough either. `excludeFolders` still applies:
+   * a folder the user has ruled out is ruled out for good.
+   */
+  private markerSearchScope(settings: WeekfitSettings): TFile[] {
+    const excludes = settings.excludeFolders ?? [];
+    return this.app.vault.getMarkdownFiles().filter((f) => {
+      const path = f.path.replace(/\\/g, '/');
+      if (path.endsWith('Handoff Log.md')) return false;
+      return !excludes.some((ex) => pathUnderFolder(path, ex));
+    });
   }
 }
 

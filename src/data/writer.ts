@@ -31,6 +31,7 @@ import type { MetaFlavour } from '../lib/taskmeta';
 import { applyPlacement, hasPlacement, splitTaskPrefix } from './dayplanner';
 import type { IcsLink, PlacementEdit, WriteResult, WriteSkip } from './contract';
 import { isJournalling, record } from './journal';
+import { isoDate } from './dates';
 
 /** Local-time `YYYY-MM-DD` for day `day` (0 = Monday) of the week starting
  *  `weekStart` — the same construction `IntentionsRail`'s `todayIso` uses,
@@ -1102,6 +1103,17 @@ export async function updateIcsTaskRanges(
   const results: WriteResult[] = [];
   for (const u of updates) {
     const range = dayPlannerRange(clockMinutes(u.start), clockMinutes(u.end));
+    // The feed can move an event to a different *day*, not just a different
+    // time — "Python 101 moved Mon 10:00 → Tue 11:00" is the motivating
+    // example for this whole feature. Rewriting only the clock range would
+    // apply half of what the summary modal just promised and leave the task
+    // sitting on Monday, which is worse than not offering the update at all.
+    //
+    // Only for a line that *already* carries a `⏳`/`[scheduled::]` date,
+    // though. Adding one to a line that has none would silently promote an
+    // unscheduled rail task onto the grid — the user put it in the rail, and
+    // a calendar refresh is not the moment to overrule that.
+    const scheduledDate = parseTaskMeta(u.link.text).dates.scheduled?.date ? isoDate(u.start) : null;
     const edit: VerifiedEdit = {
       file: u.link.path,
       line: u.link.line,
@@ -1110,7 +1122,7 @@ export async function updateIcsTaskRanges(
     };
     results.push(
       await rewriteVerifiedLines(app, [edit], (current) =>
-        applyPlacement(current, { range, scheduledDate: null }),
+        applyPlacement(current, { range, scheduledDate }),
       ),
     );
   }

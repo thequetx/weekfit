@@ -532,6 +532,37 @@ describe('VaultRepo — ICS calendar feed', () => {
 });
 
 describe('VaultRepo.readIcsLinks', () => {
+  // Found in manual testing against a real vault, and the reason this is not
+  // scoped to `filesInScope`. `taskFolders` bounds the `#thisweek` sweep; the
+  // captured task lands in the *weekly* note, which is hardly ever inside it.
+  // Scoping the marker search to it made every refresh report "up to date"
+  // forever while tracking nothing — silent, permanent, and indistinguishable
+  // from working.
+  it('finds a marker in the weekly note even when taskFolders excludes that folder', async () => {
+    const { app, vault } = makeApp();
+    vault.seed(
+      'Weekly/2026-W36.md',
+      '## Tasks\n\n- [ ] 13:00 - 14:30 Python 101 lecture [ics-uid:: py101-local]\n',
+    );
+    const repo = new VaultRepo(app, () => settings({ taskFolders: ['Notes', 'Projects'] }));
+
+    const links = await repo.readIcsLinks();
+
+    expect(links.map((l) => l.uid)).toEqual(['py101-local']);
+    expect(links[0].path).toBe('Weekly/2026-W36.md');
+  });
+
+  it('still honours excludeFolders when searching for markers', async () => {
+    const { app, vault } = makeApp();
+    vault.seed('Templates/Weekly.md', '- [ ] Placeholder [ics-uid:: template-uid]\n');
+    vault.seed('Weekly/2026-W36.md', '- [ ] Real one [ics-uid:: real-uid]\n');
+    const repo = new VaultRepo(app, () => settings({ excludeFolders: ['Templates'] }));
+
+    const links = await repo.readIcsLinks();
+
+    expect(links.map((l) => l.uid)).toEqual(['real-uid']);
+  });
+
   it('finds a checkbox line carrying an [ics-uid::] marker', async () => {
     const { app, vault } = makeApp();
     vault.seed(

@@ -1117,6 +1117,50 @@ function icsLink(overrides: Partial<IcsLink> = {}): IcsLink {
 }
 
 describe('updateIcsTaskRanges', () => {
+  // The feed can move an event to a different day, and the summary modal says
+  // so ("Mon 10:00 → Tue 11:00"). Rewriting only the clock range would apply
+  // half of what the user just approved and leave the task on Monday.
+  it('follows the feed to a new day when the line already carries a scheduled date', async () => {
+    const { app, vault } = makeApp();
+    const original = '- [ ] 10:30 - 11:30 Python 101 lecture [ics-uid:: py101-local] ⏳ 2026-09-05';
+    vault.seed('Weekly/2026-W36.md', `${original}\n`);
+
+    const result = await updateIcsTaskRanges(app, [
+      {
+        link: icsLink({ text: original }),
+        start: new Date(2026, 8, 4, 13, 0),
+        end: new Date(2026, 8, 4, 14, 30),
+      },
+    ]);
+
+    expect(result[0].written).toBe(1);
+    const line = vault.files.get('Weekly/2026-W36.md')!.split('\n')[0];
+    expect(line).toContain('13:00 - 14:30');
+    expect(line).toContain('2026-09-04');
+    expect(line).not.toContain('2026-09-05');
+    expect(line).toContain('[ics-uid:: py101-local]');
+  });
+
+  // The other half of the same rule. The user put this one in the rail on
+  // purpose; a calendar refresh is not the moment to promote it onto the grid.
+  it('does not add a scheduled date to a line that never had one', async () => {
+    const { app, vault } = makeApp();
+    const original = '- [ ] 10:30 - 11:30 Python 101 lecture [ics-uid:: py101-local]';
+    vault.seed('Weekly/2026-W36.md', `${original}\n`);
+
+    const result = await updateIcsTaskRanges(app, [
+      {
+        link: icsLink({ text: original }),
+        start: new Date(2026, 8, 4, 13, 0),
+        end: new Date(2026, 8, 4, 14, 30),
+      },
+    ]);
+
+    expect(result[0].written).toBe(1);
+    const line = vault.files.get('Weekly/2026-W36.md')!.split('\n')[0];
+    expect(line).toBe('- [ ] 13:00 - 14:30 Python 101 lecture [ics-uid:: py101-local]');
+  });
+
   it('rewrites the leading range while keeping title, tags and the marker intact', async () => {
     const { app, vault } = makeApp();
     const original = '- [ ] 09:00 - 09:30 Dentist #health [ics-uid:: cal-uid-1]';

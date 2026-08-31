@@ -359,7 +359,7 @@ export class SettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('Refresh now')
       .setDesc(
-        'Fetch the feed and reconcile any changes immediately, instead of waiting for the next automatic check.',
+        'Fetch the feed and reconcile any changes now. There is no automatic check — the feed is only ever fetched when you ask, and at most once an hour.',
       )
       .addButton((b) => {
         b.setButtonText('Refresh now');
