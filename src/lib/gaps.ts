@@ -31,6 +31,7 @@ import {
   taskKind,
 } from './duration';
 import { parseTaskId } from './taskid';
+import { DAY_PLANNER_RE, isPlaced } from './source';
 
 /** Title comparison key: the display title, lowercased, whitespace collapsed.
  *  Both sides go through `parseTaskLine`, so a `~90m` estimate or a `🆔` on the
@@ -38,7 +39,14 @@ import { parseTaskId } from './taskid';
  *  with exactly that stripped string. */
 export function titleKey(text: string): string {
   return parseTaskLine(String(text ?? ''))
-    .title.toLowerCase()
+    // A scheduled task carries a Day Planner range in its *title* — source.ts
+    // leaves it there deliberately, because that is where Day Planner and a human
+    // reader both expect it. But the calendar event this app created is titled
+    // without it, so once the app scheduled something it could no longer match
+    // its own event: the task stayed in Unscheduled and Fit this week would
+    // happily propose it a second time. Compare the work, not when it was put.
+    .title.replace(DAY_PLANNER_RE, '')
+    .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -714,6 +722,10 @@ export function fitTasks(
   for (const t of tasks) {
     if (t.done) continue;
     if (events && now && futureSessions(events, t, now).length > 0) continue;
+    // A Day Planner range on the line means the work already has a slot — whether
+    // this app put it there or the Weekfit plugin did. It is the one scheduling
+    // signal both tools share, and unlike an event it needs no calendar at all.
+    if (isPlaced(t.text)) continue;
     const est = resolveTaskDuration(t.text, durations);
     items.push({
       key: `${t.file}:${t.line}`,
