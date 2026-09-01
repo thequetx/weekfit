@@ -514,6 +514,10 @@
   width: 260px;
   flex: none;
   overflow-y: auto;
+  /* A row's trailing chips (source, placement, due, est) must never widen the
+     rail — the title shrinks first, and anything still over budget is clipped,
+     not turned into a sideways scrollbar. */
+  overflow-x: hidden;
   border-left: 1px solid var(--background-modifier-border);
   padding: var(--size-4-2);
   background: var(--background-primary-alt);
@@ -526,6 +530,42 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
+}
+
+/* B4 — the All / Unscheduled / Scheduled filter above the list. A small
+   segmented row; the active tab reads as pressed. All theme variables. */
+.weekfit-rail__filter {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+
+.weekfit-rail__filter-btn {
+  flex: 1 1 auto;
+  padding: 2px 4px;
+  font-size: 0.72em;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.weekfit-rail__filter-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* The selected tab. `--active:hover` is spelled out because `.btn:hover` has a
+   higher specificity than `.btn--active` and would otherwise repaint it on
+   hover. Accent fill, the same "this one is on" treatment the fit-bar and
+   ghost-accept buttons use. */
+.weekfit-rail__filter-btn--active,
+.weekfit-rail__filter-btn--active:hover {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
 }
 
 .weekfit-rail__empty {
@@ -563,6 +603,32 @@
   padding: 4px 6px;
   border-radius: var(--radius-m);
   background: var(--background-secondary);
+}
+
+/* Scheduled: still here so the rail is a complete to-do list, but visibly
+   "handled" — muted, no drag cursor. */
+.weekfit-rail__item--scheduled {
+  opacity: 0.55;
+}
+
+/* Done: struck through and faint. Kept all week — it answers "what did I get
+   through", and it feeds the weekly review. */
+.weekfit-rail__item--done .weekfit-rail__title {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+.weekfit-rail__item--done {
+  opacity: 0.5;
+}
+
+/* Neither a scheduled nor a done row is draggable (JS drops the drag handler);
+   the base rule's `grab` / `grabbing` would be a lie, so both read as a plain
+   click-to-open. */
+.weekfit-rail__item--scheduled .weekfit-rail__title,
+.weekfit-rail__item--done .weekfit-rail__title,
+.weekfit-rail__item--scheduled .weekfit-rail__title:active,
+.weekfit-rail__item--done .weekfit-rail__title:active {
+  cursor: pointer;
 }
 
 /* Priority, drawn as a text glyph rather than the standard's emoji — see
@@ -1374,12 +1440,15 @@
   cursor: grabbing;
 }
 
-/* Where a task lives, when that isn't the weekly note. Shown because ticking
-   or scheduling such a row writes to a file the user was not otherwise told
-   about. */
+/* The small trailing pills: "where this lives" (a task outside the weekly
+   note) and, on a scheduled row, "where it landed" (`Tue 2pm`). A row can
+   carry both, so they yield under pressure — capped narrower than before and
+   allowed to shrink — rather than pushing the row past the rail's width.
+   The deeper "too many chips crowd the title" question is Roadmap §11. */
 .weekfit-rail__source {
-  flex: 0 0 auto;
-  max-width: 14ch;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 10ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1393,8 +1462,8 @@
 /* The block a rail task will become, previewed while it is being dragged in. */
 .weekfit-grid__incoming {
   position: absolute;
-  left: 2px;
-  right: 2px;
+  left: 8px;
+  right: 4px;
   z-index: 5;
   overflow: hidden;
   padding: 2px 4px;

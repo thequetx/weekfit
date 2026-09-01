@@ -764,7 +764,7 @@ describe('WeekGrid — conflict marking', () => {
     expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:40', 2, 600);
   });
 
-  it('a block dragged onto another scheduled block gets the conflict marker, naming that block', () => {
+   it('a block dragged onto another scheduled block lanes beside it, without the conflict marker', () => {
     const onMoveBlock = vi.fn();
     const other = calEvent({
       uid: 'Weekly/2026-W36.md:41',
@@ -781,18 +781,20 @@ describe('WeekGrid — conflict marking', () => {
       <WeekGrid {...baseProps({ scheduled: [ev, other], gaps: null, onMoveBlock })} />,
     );
     installGeometry(container);
-    // `ev` renders first — `scheduled`'s own order, preserved by the filter
-    // in WeekGrid — so it's the first `.weekfit-ev` in the DOM.
     const block = container.querySelectorAll('.weekfit-ev')[0] as HTMLElement;
 
     fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540)));
     windowPointer('pointermove', 250, BODY_TOP + yFor(600));
 
-    expect(block.className).toContain('weekfit-ev--conflict');
-    expect(block.getAttribute('aria-label')).toMatch(/team sync/i);
+    // Two real blocks at the same time now sit side by side — both readable —
+    // so the marker that existed only to flag a hidden overlap is gone, and the
+    // other block's title is no longer folded into this one's aria-label.
+    expect(block.className).not.toContain('weekfit-ev--conflict');
+    expect(block.getAttribute('aria-label')).not.toMatch(/team sync/i);
 
     windowPointer('pointerup', 250, BODY_TOP + yFor(600));
 
+    // Marking or not, the drop still lands.
     expect(onMoveBlock).toHaveBeenCalledTimes(1);
     expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:42', 2, 600);
   });
@@ -1111,4 +1113,39 @@ describe('WeekGrid — read-only ICS events', () => {
 
     expect(onDropIcsToRail).not.toHaveBeenCalled();
   });
+});
+
+it('packs two overlapping scheduled events into separate lanes', () => {
+  const at9 = { start: dateAt(WEDNESDAY, 9, 0), end: dateAt(WEDNESDAY, 10, 0) };
+
+  // Baseline: a lone block → full-width geometry.
+  const r1 = render(
+    <WeekGrid {...baseProps({ scheduled: [calEvent({ uid: 's', title: 'Solo', ...at9 })] })} />,
+  );
+  const soloWidth = (r1.getByRole('group', { name: /^Solo/ }) as HTMLElement).style.width;
+  cleanup();
+
+  // Two overlapping blocks → each narrower than the baseline, in different lanes.
+  const a = calEvent({ uid: 'a', title: 'Standup', ...at9 });
+  const b = calEvent({
+    uid: 'b', title: 'Design review',
+    start: dateAt(WEDNESDAY, 9, 30), end: dateAt(WEDNESDAY, 10, 30),
+  });
+  const r2 = render(<WeekGrid {...baseProps({ scheduled: [a, b] })} />);
+  const elA = r2.getByRole('group', { name: /^Standup/ }) as HTMLElement;
+  const elB = r2.getByRole('group', { name: /^Design review/ }) as HTMLElement;
+
+  expect(elA.style.width).not.toBe(soloWidth);        // narrowed from full width
+  expect(elB.style.width).not.toBe(soloWidth);
+  expect(elA.style.left).not.toBe(elB.style.left);    // different lanes
+  expect(elA.style.right).toBe('auto');
+  expect(elB.style.right).toBe('auto');
+});
+
+it('does not red-flag two real blocks sitting side by side', () => {
+  const a = calEvent({ uid: 'a', title: 'Standup', start: dateAt(WEDNESDAY, 9, 0), end: dateAt(WEDNESDAY, 10, 0) });
+  const b = calEvent({ uid: 'b', title: 'Review', start: dateAt(WEDNESDAY, 9, 0), end: dateAt(WEDNESDAY, 11, 0) });
+  const r = render(<WeekGrid {...baseProps({ scheduled: [a, b] })} />);
+  const elA = r.getByRole('group', { name: /^Standup/ }) as HTMLElement;
+  expect(elA.className).not.toContain('weekfit-ev--conflict');
 });

@@ -2,7 +2,7 @@ import '@testing-library/jest-dom/vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { IntentionsRail } from '../src/components/IntentionsRail';
-import type { DurationMap, VaultTask } from '../src/lib/types';
+import type { CalEvent, DurationMap, VaultTask } from '../src/lib/types';
 
 // vitest.config.ts doesn't run with `test.globals: true`, so
 // @testing-library/react's automatic afterEach(cleanup) never registers —
@@ -83,26 +83,37 @@ describe('IntentionsRail', () => {
     expect(est!.className).toContain('weekfit-rail__est--default');
   });
 
-  it('excludes a task that already has a Day Planner range', () => {
+  it('marks a task that is on the grid as scheduled, and still shows it', () => {
+    const onGrid = task('Sits on the grid');
+    const waiting = task('Not yet scheduled', { line: 1 });
     render(
       <IntentionsRail
-        tasks={[task('09:00 - 10:30 Already scheduled'), task('Not yet scheduled')]}
+        tasks={[onGrid, waiting]}
+        scheduledLines={[onGrid]}
         durations={DURATIONS}
       />,
     );
-    expect(screen.queryByText('Already scheduled')).not.toBeInTheDocument();
-    expect(screen.getByText('Not yet scheduled')).toBeInTheDocument();
+    expect(screen.getByText('Sits on the grid').closest('.weekfit-rail__item')).toHaveClass(
+      'weekfit-rail__item--scheduled',
+    );
+    expect(screen.getByText('Not yet scheduled').closest('.weekfit-rail__item')).toHaveClass(
+      'weekfit-rail__item--unscheduled',
+    );
   });
 
-  it('excludes a done task', () => {
+  it('shows a done task struck through rather than hiding it', () => {
     render(
       <IntentionsRail
-        tasks={[task('Finished already', { done: true }), task('Still open')]}
+        tasks={[task('Finished already', { done: true }), task('Still open', { line: 1 })]}
         durations={DURATIONS}
       />,
     );
-    expect(screen.queryByText('Finished already')).not.toBeInTheDocument();
-    expect(screen.getByText('Still open')).toBeInTheDocument();
+    expect(screen.getByText('Finished already').closest('.weekfit-rail__item')).toHaveClass(
+      'weekfit-rail__item--done',
+    );
+    expect(screen.getByText('Still open').closest('.weekfit-rail__item')).toHaveClass(
+      'weekfit-rail__item--unscheduled',
+    );
   });
 
   it('sorts by priority then due date (compareMeta order)', () => {
@@ -130,4 +141,24 @@ describe('IntentionsRail', () => {
     expect(screen.queryAllByRole('listitem')).toHaveLength(0);
     expect(screen.getByText(/nothing waiting/i)).toBeInTheDocument();
   });
+
+  it('labels a scheduled row with where it landed', () => {
+    const onGrid = task('Sits on the grid');
+    const block: CalEvent = {
+      uid: 'Weekly/2026-W36.md:0',                       // = `${onGrid.file}:${onGrid.line}`
+      title: 'Sits on the grid',
+      start: new Date(2026, 8, 1, 14, 0),                 // Tue 1 Sep 2026, 14:00
+      end: new Date(2026, 8, 1, 15, 0),
+      allDay: false,
+    };
+    render(
+      <IntentionsRail
+        tasks={[onGrid]}
+        scheduledLines={[onGrid]}
+        scheduled={[block]}
+        durations={DURATIONS}
+      />,
+    );
+      expect(screen.getByText('Tue 2pm')).toBeInTheDocument();
+    });
 });

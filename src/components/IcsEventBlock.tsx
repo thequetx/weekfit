@@ -2,6 +2,7 @@ import type { PointerEvent } from 'react';
 import { yForMinutes } from '../lib/grid';
 import { fmtClock, fmtMinutes, minutesOfDay, sameDate } from '../lib/week';
 import type { CalEvent } from '../lib/types';
+import { laneStyle } from './lanes';
 
 export interface IcsEventBlockProps {
   ev: CalEvent;
@@ -19,6 +20,14 @@ export interface IcsEventBlockProps {
    *  `WeekGrid` tracks the rest on `window`, same discipline as every other
    *  drag in this file. */
   onDragStart: (ev: CalEvent, e: PointerEvent<HTMLDivElement>) => void;
+  /**
+   * Horizontal packing from WeekGrid's `packLanes` — which of its cluster's
+   * columns this block sits in, and how many columns that cluster has.
+   * Optional and defaulted (0 / 1) so any caller or test that omits them
+   * renders exactly as before: one full-width column.
+   */
+  lane?: number;
+  lanes?: number;
 }
 
 /**
@@ -49,7 +58,7 @@ export function icsEventMinutes(ev: CalEvent): { startMin: number; endMin: numbe
  * `.weekfit-ev`'s solid committed look — a calendar event Weekfit didn't book
  * and can't edit must never read as one of this plugin's own blocks.
  */
-export function IcsEventBlock({ ev, startMin, endMin, dragging, onDragStart }: IcsEventBlockProps) {
+export function IcsEventBlock({ ev, startMin, endMin, lane = 0, lanes = 1, dragging, onDragStart }: IcsEventBlockProps) {
   const top = yForMinutes(startMin);
   const height = Math.max(yForMinutes(endMin) - top, 18);
   const tight = height < 40;
@@ -59,7 +68,7 @@ export function IcsEventBlock({ ev, startMin, endMin, dragging, onDragStart }: I
   return (
     <div
       className={`weekfit-ev weekfit-ev--ics${tight ? ' weekfit-ev--tight' : ''}${dragging ? ' weekfit-ev--dragging' : ''}`}
-      style={{ top, height }}
+      style={{ top, height, ...laneStyle(lane, lanes) }}
       title={ev.description ? `${ev.title}\n\n${ev.description}` : ev.title}
       role="group"
       aria-label={label}

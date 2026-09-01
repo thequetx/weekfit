@@ -388,6 +388,7 @@ export function WeekViewRoot({
         <IntentionsRail
           tasks={unscheduledSource}
           durations={settings.durations}
+          scheduled={snapshot.scheduled}
           scheduledLines={snapshot.scheduledLines}
           weeklyNotePath={snapshot.notePath}
           onOpenTask={(t) => onOpenTask(t.file, t.line)}

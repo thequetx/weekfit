@@ -2,6 +2,7 @@ import type { PointerEvent } from 'react';
 import { yForMinutes } from '../lib/grid';
 import { fmtMinutes } from '../lib/week';
 import type { Proposal } from '../lib/gaps';
+import { laneStyle } from './lanes';
 
 export interface GhostBlockProps {
   proposal: Proposal;
@@ -31,6 +32,14 @@ export interface GhostBlockProps {
     edge: 'top' | 'bottom',
     e: PointerEvent<HTMLDivElement>,
   ) => void;
+  /**
+   * Horizontal packing from WeekGrid's `packLanes` — which of its cluster's
+   * columns this block sits in, and how many columns that cluster has.
+   * Optional and defaulted (0 / 1) so any caller or test that omits them
+   * renders exactly as before: one full-width column.
+   */
+  lane?: number;
+  lanes?: number;
 }
 
 /**
@@ -87,6 +96,8 @@ export function GhostBlock({
   proposal,
   startMin,
   endMin,
+  lane = 0,
+  lanes = 1,
   dragging,
   resizing,
   onAccept,
@@ -124,7 +135,7 @@ export function GhostBlock({
       }${dragging ? ' weekfit-ghost--dragging' : ''}${
         resizing ? ' weekfit-ghost--resizing' : ''
       }${proposal.conflict ? ' weekfit-ghost--conflict' : ''}`}
-      style={{ top, height }}
+      style={{ top, height, ...laneStyle(lane, lanes) }}
       data-groupkey={proposal.groupKey}
       role="group"
       aria-label={label}

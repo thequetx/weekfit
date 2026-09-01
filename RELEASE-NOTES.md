@@ -1,3 +1,13 @@
+## 0.2.2
+
+**Two things at the same time now sit side by side.** Before this, a block that overlapped another was drawn in the same rectangle, one on top of the other, and both titles were unreadable — which a calendar feed turned from a rare accident into the normal case. Overlapping blocks now split the column and stay legible, the same way every calendar app does it. Picking one up, resizing it, and dragging it back to the rail all still work on a crowded day.
+
+- **The conflict marker got quieter.** The red tint and ⚠ used to fire on *any* overlap. Now that both blocks are visible, it only marks an overlap you genuinely can't see — a block sitting on top of a recurring commitment drawn behind the week. A *Fit this week* proposal still flags either way, since you haven't accepted it yet.
+
+**The task pane is a to-do list now, not just an inbox.** It used to hide a task the moment you scheduled it, which read as *lost*. It now shows the whole week: unscheduled work as before, scheduled tasks greyed with where they landed (`Tue 2pm`), and completed ones struck through. A small **All / Unscheduled / Scheduled** filter at the top if you want the old view back.
+
+- **Rail names lost their routing noise.** A task tagged `#thisweek` at the front, or a swept line that still carries a `09:00 - 10:30` range, now shows just its name in the list. The line in your note is untouched.
+
 ## 0.2.0
 
 **Calendar sync.** Add one read-only iCalendar (.ics) feed URL in Settings and its events show up on the grid, right alongside everything else. By default they block scheduling gaps too — Fit this week won't propose a slot your calendar already has claimed — with a toggle if you'd rather they were shown but not treated as busy. The window is 2 weeks back, 8 forward.

@@ -11,6 +11,8 @@ import { EventBlock, eventMinutes } from './EventBlock';
 import { IcsEventBlock, icsEventMinutes } from './IcsEventBlock';
 import { NowLine } from './NowLine';
 import { GhostBlock } from './GhostBlock';
+import { packLanes, laneStyle } from './lanes';
+import type { LanePlacement, Spanned } from './lanes';
 
 export interface WeekGridProps {
   /** Local midnight on the Monday of the rendered week. */
@@ -1017,6 +1019,40 @@ export function WeekGrid({
         const dayBlocks = blocks.filter((b) => b.days.includes(di));
         const dayGaps = gapList.filter((g) => g.day === di);
         const dayProposals = proposals.filter((p) => positionOf(p).day === di);
+        // One lane layout for every foreground block in this day, whatever its
+        // kind — a ghost, a real block and an ICS event at the same hour must
+        // share the column rather than overlap. Positions come from the same
+        // effective getters the render uses below (eventPositionOf /
+        // icsEventMinutes / positionOf), so a mid-drag preview is packed where
+        // it is actually drawn.
+        const laneItems: Spanned[] = [
+          ...dayEvents.map((e) => {
+            const p = eventPositionOf(e);
+            return { id: `ev:${e.uid}`, startMin: p.startMin, endMin: p.endMin };
+          }),
+          ...dayIcsEvents.map((e) => {
+            const p = icsEventMinutes(e);
+            return { id: `ics:${e.uid}`, startMin: p.startMin, endMin: p.endMin };
+          }),
+          ...dayProposals.map((pr) => {
+            const p = positionOf(pr);
+            return { id: `ghost:${pr.key}`, startMin: p.startMin, endMin: p.endMin };
+          }),
+            // The rail task mid-flight — packed alongside the committed blocks so it
+            // slots into a free lane instead of covering the column. Only present on
+            // the day under the cursor, and only while a drag is happening.
+           ...(incoming && incomingPreview?.day === di
+           ? [{
+               id: 'incoming:',
+                startMin: incomingPreview.startMin,
+               endMin: incomingPreview.startMin + incoming.minutes,
+            }]
+          : []),
+        ];
+        const lanePlacements = packLanes(laneItems);
+        const laneFor = (id: string): LanePlacement =>
+          lanePlacements.get(id) ?? { lane: 0, lanes: 1 };
+        const incomingLane = laneFor('incoming:');
         const isToday = sameDate(day, now);
 
         return (
@@ -1107,15 +1143,20 @@ export function WeekGrid({
                 // Excludes `e` itself from what it's checked against — a
                 // block never conflicts with where it currently is.
                 const conflict = conflictFor(di, pos.startMin, pos.endMin, e.uid);
+                // A laned block sitting beside another real block no longer needs the marker —
+                // you can see both. Keep it only when the thing it overlaps is a recurring
+                // block, which is drawn full-width behind it and is genuinely hidden.
+                const shownConflict = conflict?.kind === 'skeleton' ? conflict : null;
                 return (
                   <EventBlock
                     key={`${e.uid}-${i}`}
                     ev={e}
                     startMin={pos.startMin}
                     endMin={pos.endMin}
+                    {...laneFor(`ev:${e.uid}`)}
                     dragging={eventPreview?.uid === e.uid}
                     resizing={eventResizePreview?.uid === e.uid}
-                    conflict={conflict}
+                    conflict={shownConflict}
                     onUnschedule={onUnschedule}
                     onSplit={onSplit}
                     onDragStart={handleEventDragStart}
@@ -1137,6 +1178,7 @@ export function WeekGrid({
                     ev={e}
                     startMin={pos.startMin}
                     endMin={pos.endMin}
+                    {...laneFor(`ics:${e.uid}`)}
                     dragging={icsDraggingUid === e.uid}
                     onDragStart={handleIcsDragStart}
                   />
@@ -1156,6 +1198,7 @@ export function WeekGrid({
                     proposal={effectiveProposal}
                     startMin={pos.startMin}
                     endMin={pos.endMin}
+                    {...laneFor(`ghost:${p.key}`)}
                     dragging={preview?.key === p.key}
                     resizing={ghostResizePreview?.key === p.key}
                     onAccept={onAccept}
@@ -1178,8 +1221,9 @@ export function WeekGrid({
                       yForMinutes(incomingPreview.startMin + incoming.minutes) -
                         yForMinutes(incomingPreview.startMin),
                       18,
-                    ),
-                  }}
+                      ),
+                      ...laneStyle(incomingLane.lane, incomingLane.lanes),
+                    }}
                   aria-hidden="true"
                 >
                   {fmtMinutes(incomingPreview.startMin)} {parseTaskMeta(incoming.task.text).title}

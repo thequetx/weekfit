@@ -4,6 +4,7 @@ import { canSplit } from '../data/split';
 import { fmtClock, fmtMinutes, minutesOfDay, sameDate } from '../lib/week';
 import type { CalEvent } from '../lib/types';
 import type { ProposalConflict } from '../lib/gaps';
+import { laneStyle } from './lanes';
 
 export interface EventBlockProps {
   ev: CalEvent;
@@ -47,6 +48,14 @@ export interface EventBlockProps {
    *  never also start a move or (on release) read as the click that opens
    *  the source line. */
   onResizeStart: (ev: CalEvent, edge: 'top' | 'bottom', e: PointerEvent<HTMLDivElement>) => void;
+  /**
+   * Horizontal packing from WeekGrid's `packLanes` — which of its cluster's
+   * columns this block sits in, and how many columns that cluster has.
+   * Optional and defaulted (0 / 1) so any caller or test that omits them
+   * renders exactly as before: one full-width column.
+   */
+  lane?: number;
+  lanes?: number;
 }
 
 /**
@@ -108,6 +117,8 @@ export function EventBlock({
   ev,
   startMin,
   endMin,
+  lane = 0,
+  lanes = 1,
   dragging,
   resizing,
   conflict,
@@ -137,7 +148,7 @@ export function EventBlock({
   return (
     <div
       className={`weekfit-ev${tight ? ' weekfit-ev--tight' : ''}${dragging ? ' weekfit-ev--dragging' : ''}${resizing ? ' weekfit-ev--resizing' : ''}${conflict ? ' weekfit-ev--conflict' : ''}`}
-      style={{ top, height }}
+      style={{ top, height, ...laneStyle(lane, lanes) }}
       title={conflictLabel ?? (ev.description ? `${ev.title}\n\n${ev.description}` : ev.title)}
       role="group"
       aria-label={label}
