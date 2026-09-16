@@ -1,7 +1,7 @@
 {
   "id": "weekfit",
   "name": "Weekfit",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "minAppVersion": "1.7.2",
   "description": "Press one button and see where the week's work fits. Schedules your unscheduled tasks into the gaps between your commitments.",
   "author": "Tyler Williams",

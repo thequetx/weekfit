@@ -1,3 +1,7 @@
+## 0.2.3
+
+**A hand-drag now lands exactly where you drop it.** Releasing a block near — but not on — a free gap used to pull it onto that gap's edge instead of the spot the drag preview had just shown you. That's gone: moving a ghost or a scheduled block always lands where you release it, and the conflict marker (⚠) is the only thing that tells you a spot overlaps something — the same way it already worked for resizing.
+
 ## 0.2.2
 
 **Two things at the same time now sit side by side.** Before this, a block that overlapped another was drawn in the same rectangle, one on top of the other, and both titles were unreadable — which a calendar feed turned from a rare accident into the normal case. Overlapping blocks now split the column and stay legible, the same way every calendar app does it. Picking one up, resizing it, and dragging it back to the rail all still work on a crowded day.
