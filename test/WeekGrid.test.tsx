@@ -301,7 +301,7 @@ describe('WeekGrid — a drag is clamped to the grid bounds', () => {
   });
 });
 
-describe('WeekGrid — drop legality (snapToGap)', () => {
+describe('WeekGrid — drop placement (freehand, no gap legality)', () => {
   const yFor = (min: number) => ((min - 300) / 60) * 46;
 
   it('gaps === null: the move always lands, with no legality check', () => {
@@ -322,15 +322,14 @@ describe('WeekGrid — drop legality (snapToGap)', () => {
     windowPointer('pointerup', 250, BODY_TOP + yFor(600));
 
     expect(onMoveBlock).toHaveBeenCalledTimes(1);
-
-    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:3', 2, 600);
   });
 
   // Was: "reverts, no callback". Refusing made dragging feel broken — aiming
   // anywhere outside a gap, which is most of a busy week, silently snapped the
   // block back with no explanation. A deliberate hand-placement now lands, and
   // the conflict marker is what says it overlaps something.
-  it('gaps present but snapToGap finds nothing: still lands where the pointer was', () => {
+  it('gaps present but no gap fits: still lands where the pointer was', () => {
     const onMoveBlock = vi.fn();
     const ev = calEvent({
       uid: 'Weekly/2026-W36.md:4',
@@ -351,7 +350,7 @@ describe('WeekGrid — drop legality (snapToGap)', () => {
     expect(onMoveBlock).toHaveBeenCalledTimes(1);
   });
 
-  it('gaps present but snapToGap finds nothing for a ghost either: it still lands', () => {
+  it('gaps present but none fit, for a ghost either: it still lands', () => {
     const onMoveProposal = vi.fn();
     const p = proposal();
     const { container } = render(
@@ -365,6 +364,67 @@ describe('WeekGrid — drop legality (snapToGap)', () => {
     windowPointer('pointerup', 250, BODY_TOP + yFor(660));
 
     expect(onMoveProposal).toHaveBeenCalledTimes(1);
+  });
+
+  // The regression this feature is actually about: a *fitting* gap sitting
+  // well within the old 90-minute reach used to win over the raw drop. Drop
+  // at noon (720) with a same-sized gap at 13:00-14:00 (780-840, within
+  // reach) — the old code would have relocated this to 780. It must now stay
+  // at exactly the position the drag preview showed.
+  it('a nearby gap that would fit the block does not pull the drop onto it', () => {
+    const onMoveBlock = vi.fn();
+    const ev = calEvent({
+      uid: 'Weekly/2026-W36.md:5',
+      start: dateAt(WEDNESDAY, 9, 0), // startMin 540, duration 60
+      end: dateAt(WEDNESDAY, 10, 0),
+    });
+    const gap: Gap = {
+      day: 2,
+      startMin: 780, // 13:00
+      endMin: 840, // 14:00 — exactly big enough for the 60-minute block
+      minutes: 60,
+      window: 'work',
+      windowIndex: 0,
+      minBlockMin: 30,
+    };
+    const { container } = render(
+      <WeekGrid {...baseProps({ scheduled: [ev], gaps: [gap], onMoveBlock })} />,
+    );
+    installGeometry(container);
+    const block = container.querySelector('.weekfit-ev') as HTMLElement;
+
+    fireEvent.pointerDown(block, pointer(250, BODY_TOP + yFor(540))); // grab at the block's own start, offset 0
+    windowPointer('pointermove', 250, BODY_TOP + yFor(720)); // drag to noon
+    windowPointer('pointerup', 250, BODY_TOP + yFor(720));
+
+    expect(onMoveBlock).toHaveBeenCalledTimes(1);
+    expect(onMoveBlock).toHaveBeenCalledWith('Weekly/2026-W36.md:5', 2, 720);
+  });
+
+  it('same regression, for a ghost', () => {
+    const onMoveProposal = vi.fn();
+    const gap: Gap = {
+      day: 2,
+      startMin: 780,
+      endMin: 840,
+      minutes: 60,
+      window: 'work',
+      windowIndex: 0,
+      minBlockMin: 30,
+    };
+    const p = proposal({ day: 2, startMin: 540, endMin: 600, minutes: 60 });
+    const { container } = render(
+      <WeekGrid {...baseProps({ gaps: [gap], proposals: [p], onMoveProposal })} />,
+    );
+    installGeometry(container);
+    const ghost = container.querySelector('.weekfit-ghost') as HTMLElement;
+
+    fireEvent.pointerDown(ghost, pointer(250, BODY_TOP + yFor(540)));
+    windowPointer('pointermove', 250, BODY_TOP + yFor(720));
+    windowPointer('pointerup', 250, BODY_TOP + yFor(720));
+
+    expect(onMoveProposal).toHaveBeenCalledTimes(1);
+    expect(onMoveProposal).toHaveBeenCalledWith('Weekly/2026-W36.md:5', 2, 720);
   });
 });
 

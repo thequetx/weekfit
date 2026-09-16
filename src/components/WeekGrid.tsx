@@ -4,7 +4,7 @@ import { bodyHeight, endHour, gridHours, minutesForY, startHour, yForMinutes } f
 import { DAY_NAMES, addDays, dayIndex, fmtHourLabel, fmtMinutes, sameDate } from '../lib/week';
 import type { CalEvent, SkeletonBlock, VaultTask } from '../lib/types';
 import type { Gap, Proposal, ProposalConflict } from '../lib/gaps';
-import { proposalConflict, snapToGap } from '../lib/gaps';
+import { proposalConflict } from '../lib/gaps';
 import { SNAP_MINUTES, snapToGrid } from '../lib/duration';
 import { parseTaskMeta } from '../lib/taskmeta';
 import { EventBlock, eventMinutes } from './EventBlock';
@@ -289,26 +289,29 @@ interface ProposalResizePreview {
  * vault line it came from — `moved` on its drag state is exactly the ghost's
  * own click/drag distinction, reused for the same reason.
  *
- * A ghost's drop asks `snapToGap` (pure arithmetic from `lib/gaps.ts`) for the
- * nearest legal slot on the day it landed on; `null` means nothing on that day
- * fits, and the drop is discarded outright — the block's rendered position
- * falls back to its own start, exactly where it was before the drag, because
- * flinging it elsewhere or refusing silently would both be the board deciding
- * for Tyler. A real block follows the same rule once a fit has run (`gaps` is
- * an array); before that (`gaps` is `null`) there is nothing to check
- * legality against, so it snaps to the grid's own 30-minute lattice instead —
- * see `handleEventDragEnd`.
+ * A ghost's drop, and a real block's, always lands exactly where the pointer
+ * released it — snapped only to the grid's own 30-minute lattice and clamped
+ * to the grid's bounds, the same treatment every placement path (resize,
+ * a task dragged in from the rail) already gets. `proposalConflict`
+ * (`lib/gaps.ts`) is what tells the user whether that spot overlaps
+ * something; nothing here refuses or relocates a hand-placement. (`snapToGap`,
+ * also in `lib/gaps.ts`, still exists and is still tested — it is no longer
+ * consulted on drop. It used to pull a placement onto a nearby gap's edge
+ * whenever one sat within its 90-minute reach, which silently disagreed with
+ * where the drag preview had just shown the block landing. Removed
+ * 2026-09-16 on direct feedback asking to place a block anywhere, not just
+ * near a gap.)
  *
  * Edge-drag resize (both ghost and real block) is the same mechanism —
  * `onPointerDown` on a thin handle at the block's top or bottom edge starts a
  * gesture tracked on `window` for the same reason a move is, and the moving
  * edge preserves its own grab offset the same way a move preserves the
  * block's — extended with two more `dragKind`s per block type (`*-resize-top`
- * / `*-resize-bottom`) rather than a second, parallel machine. It deliberately
- * skips the `snapToGap` legality check a move gets: `computeGaps` marks a
- * scheduled block's own footprint as *busy*, so a block being resized is never
- * inside any gap in the first place, and gating on that would make every
- * resize illegal by construction. A resize is instead clamped to the
+ * / `*-resize-bottom`) rather than a second, parallel machine. A resize was
+ * never gated on gap legality even before moves lost that gate too: `computeGaps`
+ * marks a scheduled block's own footprint as *busy*, so a block being resized
+ * is never inside any gap in the first place, and gating on that would make
+ * every resize illegal by construction. A resize is instead clamped to the
  * 30-minute lattice, a one-step minimum duration, and the grid's own bounds —
  * see `clampTopEdge`/`clampBottomEdge` — and then always lands. (Marking the
  * overlap this can create against another block is a known follow-up, not
@@ -496,22 +499,16 @@ export function WeekGrid({
 
     const day = dayAt(e.clientX);
     const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, drag.proposal.minutes);
-    // Prefer a legal gap on that day; if there is none, still land where the
-    // pointer actually was.
+    // Always land exactly where the preview showed it landing.
     //
-    // Refusing the drop was the old behaviour and it made dragging feel
-    // broken: aiming anywhere outside a gap — which is most of a busy week —
-    // silently snapped the ghost back with no explanation. The board already
-    // marks a placement that overlaps something, so a hand-drop into occupied
-    // time is *information*, not an error. Same rule a real block already
-    // follows, and the same rule conflict marking was built on: mark it, don't
-    // refuse it.
-    const snapped = snapToGap(gapList, day, startMin, drag.proposal.minutes);
-    if (snapped) {
-      onMoveProposal(drag.proposal.key, snapped.gap.day, snapped.startMin);
-    } else {
-      onMoveProposal(drag.proposal.key, day, startMin);
-    }
+    // Was: prefer a legal gap via `snapToGap`, falling back to the raw
+    // position only when nothing on that day fit. Removed 2026-09-16 — the
+    // drag preview above never consulted `snapToGap`, so committing through
+    // it here could silently relocate the block onto a nearby gap's edge the
+    // instant one sat within reach, disagreeing with what the user had just
+    // watched move under their cursor. `proposalConflict` is the only
+    // legality signal now, same as a resize already was.
+    onMoveProposal(drag.proposal.key, day, startMin);
   }
 
   function positionOf(p: Proposal): { day: number; startMin: number; endMin: number } {
@@ -640,8 +637,8 @@ export function WeekGrid({
     const snapped = snapToGrid(raw);
     // Deliberately *not* gated on `snapToGap`/`gaps` — see the doc comment on
     // `WeekGrid` above (Phase 2C's resize section) for why a resize is exempt
-    // from the legality check a move gets: `computeGaps` treats the block's
-    // own footprint as busy, so gating here would make every resize illegal.
+    // from gap legality: `computeGaps` treats the block's own footprint as
+    // busy, so gating here would make every resize illegal.
     if (drag.edge === 'top') {
       const startMin = clampTopEdge(snapped, drag.anchorMin);
       // Landed back where it started -> nothing to report.
@@ -721,27 +718,16 @@ export function WeekGrid({
     const durationMin = Math.max(orig.endMin - orig.startMin, 1);
     const startMin = grabAdjustedStart(day, e.clientY, drag.grabOffsetMin, durationMin);
 
-    if (gaps == null) {
-      // "Fit this week" hasn't run, so there are no gaps to check legality
-      // against — `grabAdjustedStart` already snapped to the grid's
-      // 30-minute lattice and clamped to the grid's bounds, the same
-      // treatment a freshly-placed block gets everywhere else. Unlike the
-      // gap-aware path below, there's nothing to refuse against, so the move
-      // always lands.
-      onMoveBlock(drag.ev.uid, day, startMin);
-      return;
-    }
-
-    // Prefer a gap; otherwise land where the pointer was and let the conflict
-    // marker say so. See the matching note on the ghost drop above — a drag
-    // that silently snaps back reads as broken, and refusing a deliberate
-    // hand-placement is the board overruling the user.
-    const snapped = snapToGap(gaps, day, startMin, durationMin);
-    if (snapped) {
-      onMoveBlock(drag.ev.uid, snapped.gap.day, snapped.startMin);
-    } else {
-      onMoveBlock(drag.ev.uid, day, startMin);
-    }
+    // Always land exactly where the preview showed it — see the matching
+    // note on the ghost drop above.
+    //
+    // Was: once a fit had run (`gaps` non-null), prefer a legal gap via
+    // `snapToGap`, falling back to the raw position only when nothing fit;
+    // before a fit had run (`gaps == null`) the move already always landed.
+    // Removed 2026-09-16 so whether a fit has run no longer changes what a
+    // hand-drag does — `proposalConflict` is the only legality signal either
+    // way.
+    onMoveBlock(drag.ev.uid, day, startMin);
   }
 
   /** Which day column `ev` currently belongs in — its own day, or the drag
@@ -801,8 +787,8 @@ export function WeekGrid({
   // See the matching comment on the ghost-resize handlers above — same
   // reasoning applies here for why this is its own handler pair rather than
   // folded into the move-drag's, just with `onResizeBlock` in place of
-  // `onResizeProposal` and no `snapToGap` gate (a resize is exempt from gap
-  // legality — see the doc comment on `WeekGrid`).
+  // `onResizeProposal` (a resize is exempt from gap legality, same as a move
+  // now is — see the doc comment on `WeekGrid`).
 
   function handleEventResizeStart(
     ev: CalEvent,
